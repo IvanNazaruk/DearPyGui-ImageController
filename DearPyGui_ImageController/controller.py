@@ -5,7 +5,7 @@ import queue
 import threading
 import time
 import traceback
-from typing import TypeVar, Callable, Any
+from typing import TypeVar, Callable, Any, Dict
 
 import dearpygui.dearpygui as dpg
 import numpy as np
@@ -227,7 +227,7 @@ class ImageInfo:
         self._worker_id = None
 
 
-class ImageController(dict[ControllerImageTag, ImageInfo]):
+class ImageController(Dict[ControllerImageTag, ImageInfo]):
     """
     Stores all hash pictures and associates it with ImageInfo.
     Also with the help of workers loads images into the DPG
