@@ -314,6 +314,7 @@ class ImageViewer:
 
     _theme: int = None
     _handler: int
+    image_handler: int | str = None
 
     texture_tag: TextureTag
     info: ImageInfo
@@ -388,6 +389,8 @@ class ImageViewer:
                                        width=width,
                                        height=height,
                                        parent=self._view_window)
+        if self.image_handler:
+            dpg.bind_item_handler_registry(self.dpg_image, self.image_handler)
 
     def set_size(self, *, width: int = None, height: int = None):
         self.width = width
@@ -407,6 +410,11 @@ class ImageViewer:
 
     def set_height(self, height: int = None):
         self.set_size(width=self.width, height=height)
+
+    def set_image_handler(self, handler: int | str):
+        self.image_handler = handler
+        if self.dpg_image:
+            dpg.bind_item_handler_registry(self.dpg_image, self.image_handler)
 
     def delete(self):
         self.__del__()
