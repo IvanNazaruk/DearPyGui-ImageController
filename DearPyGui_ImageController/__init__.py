@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from PIL import Image
 
 from .controller import ImageViewer, ImageController
