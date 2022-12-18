@@ -106,13 +106,6 @@ class ImageInfo:
     # If is_loaded is False, the texture plug will be used.
     texture_tag: TextureTag
 
-    # Time in seconds after which the picture will be unloaded from the DPG/RAM,
-    # If last time visible is not updated
-    max_inactive_time = 3
-
-    # In this number of seconds the last visibility of the image will be checked
-    unloading_check_sleep_time = 1
-
     # Shows that there is no need to queue up,
     # since the picture is already being processed
     loading = False
@@ -207,7 +200,9 @@ class ImageInfo:
             self.image = None  # noqa
 
     def is_unloading_time(self) -> bool:
-        return (time.time() - self.last_time_visible) > self.unloading_check_sleep_time
+        if self._controller is None:
+            return True
+        return (time.time() - self.last_time_visible) > self._controller.max_inactive_time
 
     def create_worker(self):
         if self._worker_id is None:
@@ -216,7 +211,7 @@ class ImageInfo:
 
     def _worker(self, id: int):
         while self._worker_id == id:
-            time.sleep(self.unloading_check_sleep_time)
+            time.sleep(self._controller.unloading_check_sleep_time)
             if self.is_unloading_time():
                 break
         if self._worker_id != id:
@@ -235,15 +230,22 @@ class ImageInfo:
 class ImageController(dict[ControllerImageTag, ImageInfo]):
     """
     Stores all hash pictures and associates it with ImageInfo.
-    Также
+    Also with the help of workers loads images into the DPG
     """
     loading_queue: queue.LifoQueue[ImageInfo]
 
-    def __init__(self, number_image_loader_workers: int = 2, queue_max_size: int = None):
+    max_inactive_time: int | float
+    unloading_check_sleep_time: int | float
+
+    def __init__(self, max_inactive_time: int = 10, unloading_check_sleep_time: int | float = 1, number_image_loader_workers: int = 2, queue_max_size: int = None):
         """
+        :param max_inactive_time: Time in seconds after which the picture will be unloaded from the DPG/RAM, If last time visible is not updated
+        :param unloading_check_sleep_time: In this number of seconds the last visibility of the image will be checked
         :param number_image_loader_workers: Number of simultaneous loading of images
         :param queue_max_size: If not set, it will be equal to number_image_loader_workers * 2
         """
+        self.max_inactive_time = max_inactive_time
+        self.unloading_check_sleep_time = unloading_check_sleep_time
         if queue_max_size is None:
             queue_max_size = number_image_loader_workers * 2
         self.loading_queue = queue.LifoQueue(maxsize=queue_max_size)
@@ -320,6 +322,7 @@ class ImageViewer:
     info: ImageInfo
 
     deleted: bool = False
+    group: int = None
 
     def __new__(cls, *args, **kwargs):
         if cls._theme is None:
@@ -329,6 +332,7 @@ class ImageViewer:
                     dpg.add_theme_style(dpg.mvStyleVar_FramePadding, 0, 0, category=dpg.mvThemeCat_Core, parent=theme_component)
                     dpg.add_theme_style(dpg.mvStyleVar_CellPadding, 0, 0, category=dpg.mvThemeCat_Core, parent=theme_component)
                     dpg.add_theme_style(dpg.mvStyleVar_ItemSpacing, 0, 0, category=dpg.mvThemeCat_Core, parent=theme_component)
+                    dpg.add_theme_style(dpg.mvStyleVar_ChildBorderSize, 0, category=dpg.mvThemeCat_Core, parent=theme_component)
         return super(ImageViewer, cls).__new__(cls)
 
     def __init__(self, href: str | Image, width: int = None, height: int = None, controller: ImageController = None):
@@ -361,7 +365,8 @@ class ImageViewer:
 
     def change_status(self, image_load_status: ImageLoadStatus, texture_tag: TextureTag):
         self.texture_tag = texture_tag
-        if self.deleted:
+        # If deleted or not rendered
+        if self.deleted or not self.group:
             return
         dpg.delete_item(self._view_window, children_only=True)
         if image_load_status:

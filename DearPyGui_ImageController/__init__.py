@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PIL import Image
 
-from .controller import ImageViewer, ImageController
+from .controller import ImageViewer, ImageController, HandlerDeleter
 from .controller import default_image_controller
 from .controller import get_texture_plug, image_to_dpg_texture, set_texture_registry
 
