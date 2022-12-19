@@ -4,14 +4,18 @@ import dearpygui.dearpygui as dpg
 
 import DearPyGui_ImageController as dpg_img
 
+path_to_images = "test_images"
+
 dpg.create_context()
 dpg_img.set_texture_registry(dpg.add_texture_registry(show=True))
+dpg_img.default_image_controller.max_inactive_time = 3
+dpg_img.default_image_controller.unloading_check_sleep_time = 1
 
 all_image_viewers: list[dpg_img.ImageViewer] = []
 
 
 def add_all_pictures():
-    for i, file in enumerate(glob.glob("Test_images/*.*")):
+    for i, file in enumerate(glob.glob(f"{path_to_images}/*.*")):
         if not i % 8:
             group = dpg.add_group(horizontal=True, parent='picture_group')
         image_viewer = dpg_img.add_image(file, height=100, parent=group)  # noqa
@@ -41,7 +45,7 @@ with dpg.window(label="Example Window", show=True, height=50, ):
 
 dpg.show_metrics()
 
-dpg.create_viewport(title='Custom Title', width=1200, height=600)
+dpg.create_viewport(title='DearPyGui-ImageController', width=1200, height=600)
 dpg.setup_dearpygui()
 dpg.show_viewport()
 dpg.start_dearpygui()

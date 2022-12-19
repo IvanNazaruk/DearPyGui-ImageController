@@ -237,7 +237,7 @@ class ImageController(Dict[ControllerImageTag, ImageInfo]):
     max_inactive_time: int | float
     unloading_check_sleep_time: int | float
 
-    def __init__(self, max_inactive_time: int = 10, unloading_check_sleep_time: int | float = 1, number_image_loader_workers: int = 2, queue_max_size: int = None):
+    def __init__(self, max_inactive_time: int = 4, unloading_check_sleep_time: int | float = 1, number_image_loader_workers: int = 2, queue_max_size: int = None):
         """
         :param max_inactive_time: Time in seconds after which the picture will be unloaded from the DPG/RAM, If last time visible is not updated
         :param unloading_check_sleep_time: In this number of seconds the last visibility of the image will be checked
