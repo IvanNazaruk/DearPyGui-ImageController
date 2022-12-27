@@ -1,5 +1,6 @@
 import glob
 import traceback
+from typing import List
 
 import dearpygui.dearpygui as dpg
 
@@ -14,7 +15,7 @@ dpg_img.set_texture_registry(dpg.add_texture_registry(show=True))
 dpg_img.default_image_controller.max_inactive_time = 3
 dpg_img.default_image_controller.unloading_check_sleep_time = 1
 
-all_image_viewers: list[dpg_img.ImageViewer] = []
+all_image_viewers: List[dpg_img.ImageViewer] = []
 
 
 def add_all_images():
@@ -57,7 +58,7 @@ def load_image(path):
 
 with dpg.window(label="Example Window", height=400, width=500):
     with dpg.tab_bar():
-        with dpg.tab(label='Example "galleries"'):
+        with dpg.tab(label='Example "gallery"'):
             with dpg.group(horizontal=True):
                 dpg.add_button(label="Set size (50x50)", callback=set_size)
                 dpg.add_button(label="Add all", callback=add_all_images)
@@ -65,7 +66,7 @@ with dpg.window(label="Example Window", height=400, width=500):
             with dpg.group(tag="image_group"):
                 pass
 
-        with dpg.tab(label="Example viewer"):
+        with dpg.tab(label='Example "viewer"'):
             dpg.add_combo(["{None}"] + images_path, callback=lambda _, path: load_image(path))
             image_viewer.create()
             dpg.add_text("{None}", tag="image_info")
