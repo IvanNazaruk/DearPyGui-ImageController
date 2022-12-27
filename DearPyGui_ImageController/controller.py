@@ -5,10 +5,40 @@ import queue
 import threading
 import time
 import traceback
+from pathlib import Path
+from typing import TYPE_CHECKING
 from typing import TypeVar, Callable, Any, Dict
 
+if TYPE_CHECKING:
+    from _typeshed import SupportsRead
+
 import dearpygui.dearpygui as dpg
-import numpy as np
+
+try:
+    import numpy as np
+
+
+    def _image_to_1d_array(image: Image) -> np.array:
+        return np.array(image, dtype=np.float32).ravel() / 255  # noqa
+except ModuleNotFoundError:
+    import logging
+
+    logger = logging.getLogger('DearPyGui_ImageController')
+    logger.warning("numpy not installed. In DPG images will take longer to load (about 8 times slower).")
+
+
+    def _image_to_1d_array(image: Image) -> list:
+        img_1D_array = []
+        image_data = image.getdata()
+        if len(image_data) == 3:
+            for pixel in image_data:
+                img_1D_array.extend((pixel[0] / 255, pixel[1] / 255, pixel[2] / 255, 1))
+        else:
+            for pixel in image_data:
+                img_1D_array.extend((pixel[0] / 255, pixel[1] / 255, pixel[2] / 255, pixel[3] / 255))
+        del image_data
+        return img_1D_array
+
 from PIL import Image as img
 from PIL.Image import Image
 
@@ -41,15 +71,14 @@ def get_texture_plug() -> TextureTag:
 
 def image_to_dpg_texture(image: Image) -> TextureTag:
     rgba_image = image.convert("RGBA")
-
-    img_1D_array = np.array(rgba_image, dtype=np.float32).ravel() / 255  # noqa
+    img_1d_array = _image_to_1d_array(rgba_image)
     dpg_texture_tag = dpg.add_static_texture(width=rgba_image.width,
                                              height=rgba_image.height,
-                                             default_value=img_1D_array,
+                                             default_value=img_1d_array,
                                              parent=texture_registry)
 
     rgba_image.close()
-    del img_1D_array, rgba_image
+    del img_1d_array, rgba_image
     return dpg_texture_tag
 
 
@@ -66,8 +95,7 @@ class HandlerDeleter:
     def add(cls, handler: int | str):
         """
         Adds a handler to the deletion queue
-        :param handler:
-        :return:
+        :param handler: DPG handler
         """
         if not cls.__thread:
             cls.__thread = True
@@ -142,7 +170,7 @@ class ImageInfo:
     def last_time_visible(self, value: time.time):
         self._last_time_visible = value
         self.create_worker()
-        if not self.is_loaded and not self.loading:
+        if not self.is_loaded and not self.loading and self._controller:
             try:
                 self._controller.loading_queue.put_nowait(self)
                 self.loading = True
@@ -179,6 +207,8 @@ class ImageInfo:
         DPG texture tag, when changes:
         (True/False, TextureTag) = (Loaded/Unloaded, New dpg texture)
         """
+        if self._controller is None:
+            return None
         subscription_tag = dpg.generate_uuid()
         self._subscribers[subscription_tag] = function
         return subscription_tag
@@ -192,6 +222,8 @@ class ImageInfo:
         if subscription_tag in self._subscribers:
             del self._subscribers[subscription_tag]
         if len(self._subscribers) == 0:
+            if self._controller is None:
+                return
             if self.tag_in_controller not in self._controller:
                 return
             del self._controller[self.tag_in_controller]
@@ -206,6 +238,8 @@ class ImageInfo:
 
     def create_worker(self):
         if self._worker_id is None:
+            if self._controller is None:
+                return
             self._worker_id = dpg.generate_uuid()
             threading.Thread(target=self._worker, args=(self._worker_id,), daemon=True).start()
 
@@ -237,7 +271,11 @@ class ImageController(Dict[ControllerImageTag, ImageInfo]):
     max_inactive_time: int | float
     unloading_check_sleep_time: int | float
 
-    def __init__(self, max_inactive_time: int = 4, unloading_check_sleep_time: int | float = 1, number_image_loader_workers: int = 2, queue_max_size: int = None):
+    def __init__(self,
+                 max_inactive_time: int = 4,
+                 unloading_check_sleep_time: int | float = 1,
+                 number_image_loader_workers: int = 2,
+                 queue_max_size: int = None):
         """
         :param max_inactive_time: Time in seconds after which the picture will be unloaded from the DPG/RAM, If last time visible is not updated
         :param unloading_check_sleep_time: In this number of seconds the last visibility of the image will be checked
@@ -255,20 +293,19 @@ class ImageController(Dict[ControllerImageTag, ImageInfo]):
 
         super().__init__()
 
-    def add(self, href: str | Image) -> tuple[ControllerImageTag, ImageInfo]:
+    def add(self, image: str | bytes | Path | SupportsRead[bytes] | Image) -> tuple[ControllerImageTag, ImageInfo]:
         """
-        :param href: File path or pillow Image
+        :param image: Pillow Image or the path to the image, or any other object that Pillow can open
         :return:
         """
 
-        if isinstance(href, str):
-            image = img.open(href)
-            image_tag = hashlib.md5(href.encode()).hexdigest()
-        elif isinstance(href, Image):
-            image = href
+        if isinstance(image, str):
+            image_tag = hashlib.md5(image.encode()).hexdigest()
+            image = img.open(image)
+        elif isinstance(image, Image):
             image_tag = hashlib.md5(image.tobytes()).hexdigest()  # TODO: Better hash function
         else:
-            raise ValueError(f"href must be an Image or str, not {type(href)}")
+            raise ValueError(f"href must be an Image or str, not {type(image)}")
 
         # Checking if an image has already been added
         image_info = self.get(image_tag, None)
@@ -309,22 +346,25 @@ default_image_controller = ImageController()
 
 
 class ImageViewer:
-    _view_window: int
-
-    width: int
-    height: int
+    width: int | None = None
+    height: int | None = None
 
     _theme: int = None
-    _handler: int
-    image_handler: int | str = None
 
-    texture_tag: TextureTag
-    info: ImageInfo
-
-    deleted: bool = False
     group: int = None
+    _view_window: int = None
 
-    def __new__(cls, *args, **kwargs):
+    dpg_image: int | None = None
+    texture_tag: TextureTag = None
+    info: ImageInfo | None = None
+    subscription_tag: SubscriptionTag = None
+
+    _visible_handler: int = None
+    image_handler: int | str | None = None
+    _controller: ImageController | None = None
+
+    @classmethod
+    def _get_theme(cls) -> int:
         if cls._theme is None:
             with dpg.theme() as cls._theme:
                 with dpg.theme_component(dpg.mvAll, parent=cls._theme) as theme_component:
@@ -333,56 +373,223 @@ class ImageViewer:
                     dpg.add_theme_style(dpg.mvStyleVar_CellPadding, 0, 0, category=dpg.mvThemeCat_Core, parent=theme_component)
                     dpg.add_theme_style(dpg.mvStyleVar_ItemSpacing, 0, 0, category=dpg.mvThemeCat_Core, parent=theme_component)
                     dpg.add_theme_style(dpg.mvStyleVar_ChildBorderSize, 0, category=dpg.mvThemeCat_Core, parent=theme_component)
-        return super(ImageViewer, cls).__new__(cls)
+        return cls._theme
 
-    def __init__(self, href: str | Image, width: int = None, height: int = None, controller: ImageController = None):
-        if controller is None:
-            controller = default_image_controller
-        self.texture_tag, self.info = controller.add(href)
-        self.width, self.height = width, height
-        with dpg.item_handler_registry() as self._handler:
-            dpg.add_item_visible_handler(callback=self.update_last_time_visible, parent=self._handler)
-        self.subscription_tag = self.info.subscribe(self.change_status)
+    def _get_visible_handler(self) -> int:
+        if not self._visible_handler:
+            with dpg.item_handler_registry() as self._visible_handler:
+                dpg.add_item_visible_handler(callback=self.update_last_time_visible, parent=self._visible_handler)
+        return self._visible_handler
 
     def update_last_time_visible(self):
-        if self.deleted:
-            return
-        self.info.update_last_time_visible()
+        if self.info:
+            self.info.update_last_time_visible()
 
     def get_size(self) -> (int, int):
         if self.width and self.height:
             return self.width, self.height
+        if not self.info:
+            if self.width:
+                return self.width, self.unload_height
+            if self.height:
+                return self.unload_width, self.height
+            return self.unload_width, self.unload_height
         if not self.width and not self.height:
             return self.info.width, self.info.height
         if self.width:
-            height = self.info.height * (self.width / self.info.width)
-            height = int(height)
+            height = int(self.info.height * (self.width / self.info.width))
             return self.width, height
         if self.height:
-            width = self.info.width * (self.height / self.info.height)
-            width = int(width)
+            width = int(self.info.width * (self.height / self.info.height))
             return width, self.height
 
-    def change_status(self, image_load_status: ImageLoadStatus, texture_tag: TextureTag):
-        self.texture_tag = texture_tag
-        # If deleted or not rendered
-        if self.deleted or not self.group:
-            return
-        dpg.delete_item(self._view_window, children_only=True)
-        if image_load_status:
-            self._render_image()
-        else:
-            self._render_loading()
+    def set_size(self, *, width: int = None, height: int = None):
+        '''
+        Set the size of the viewer when the image is loaded in the viewer
+        (is also used when dimensions are set and do not equal None).
+        If the dimensions are None the size of the picture will be used.
+        If one of the dimensions is None, it will be proportionally
+        changed in the ratio of the image size to the other dimension.
+        If a viewer is created, the changes are applied instantly.
 
-    def render(self, parent=0):
+        :param width: Viewer width. Used when the image is loaded in the viewer or another dimension is also set
+        :param height: Viewer height. Used when the image is loaded in the viewer or another dimension is also set
+        '''
+        self.width = width
+        self.height = height
+        if not self.group:
+            return
+        width, height = self.get_size()
+        try:
+            dpg.configure_item(self._view_window,
+                               width=width,
+                               height=height)
+            if self.dpg_image:
+                dpg.configure_item(self.dpg_image,
+                                   width=width,
+                                   height=height)
+        except Exception:
+            traceback.print_exc()
+
+    def set_width(self, width: int = None):
+        '''
+        It uses the function `.set_size` and only sets the width, the width will not be changed
+
+        :param width: Viewer width. Used when the image is loaded in the viewer or another dimension is also set
+        '''
+        self.set_size(width=width, height=self.height)
+
+    def set_height(self, height: int = None):
+        '''
+        It uses the function `.set_size` and only sets the height, the width will not be changed
+
+        :param height: Viewer height. Used when the image is loaded in the viewer or another dimension is also set
+        '''
+        self.set_size(width=self.width, height=height)
+
+    def __init__(self,
+                 image: str | bytes | Path | SupportsRead[bytes] | Image = None,
+                 controller: ImageController = None,
+                 unload_width: int = 100,
+                 unload_height: int = 100):
+        '''
+        Image viewer, which automatically unloads the image
+        from the DPG if the user can't see it.
+        You can specify some arguments at creation if you want
+
+        :param image: Pillow Image or the path to the image, or any other object that Pillow can open
+        :param controller: Set `None` if you want to use the default controller
+        :param unload_width: Viewer width, when the image is not yet loaded (or unloaded) from the viewer
+        :param unload_height: Viewer height, when the image is not yet loaded (or unloaded) from the viewer
+        '''
+        self.unload_width = unload_width
+        self.unload_height = unload_height
+        if controller:
+            self.set_controller(controller)
+        if image:
+            self.load(image)
+
+    def set_controller(self, controller: ImageController = None):
+        '''
+        Set the image controller.
+        The next image loading will be done through this controller.
+
+        :param controller: Set `None` if you want to set the default controller
+        '''
+        self._controller = controller
+
+    def set_image_handler(self, handler: int | str = None):
+        '''
+        Set the DPG handler on the image.
+        It will work even if the image is not loaded into the viewer.
+        Not working during image loading.
+
+        :param handler: DPG item handler
+        '''
+        self.image_handler = handler
+        if self.dpg_image:
+            try:
+                dpg.bind_item_handler_registry(self.dpg_image, self.image_handler)
+            except Exception:
+                pass
+
+    def load(self, image: str | bytes | Path | SupportsRead[bytes] | Image | None):
+        '''
+        Loads the image into the viewer, if an image already exists
+        it will be replaced by the new image.
+        If the `image` argument is None, the texture plug will be loaded,
+        this allows further use of the image handler.
+
+        :param image: Pillow Image or the path to the image, or any other object that Pillow can open
+        '''
+        if self.info:
+            self.info.unsubscribe(self.subscription_tag)
+            self.info = None
+            # Changing view to loading
+            self.change_status(False)
+
+        controller = self._controller
+        if controller is None:
+            controller = default_image_controller
+
+        # If the image is set, loads it and if possible sets it in the viewer
+        # Else it puts the texture plug
+        if image:
+            self.texture_tag, self.info = controller.add(image)
+            self.subscription_tag = self.info.subscribe(self.change_status)
+            if self.group:
+                self.change_status(self.info.is_loaded, self.info.texture_tag)
+        else:
+            if self.group:
+                self.change_status(True)
+        self.set_size(width=self.width, height=self.height)
+
+    def unload(self):
+        '''
+        Unload the loaded image from the viewer.
+        The texture plug will be loaded, the image handler will continue to work.
+        '''
+        self.load(None)
+
+    def create(self,
+               width: int = None,
+               height: int = None,
+               unload_width: int = None,
+               unload_height: int = None,
+               parent=0):
+        '''
+        Creates a viewer in the DPG, if it has already been created,
+        moves it to a new place (deletes the old).
+        If you have pre-specified the dimensions, you don't have to set them here.
+
+        :param width: Viewer width. Used when the image is loaded in the viewer or another dimension is also set
+        :param height: Viewer height. Used when the image is loaded in the viewer or another dimension is also set
+        :param unload_width: Viewer width, when the image is not yet loaded (or unloaded) from the viewer. Not used if the size is set (`width` and `height` is not None)
+        :param unload_height: Viewer height, when the image is not yet loaded (or unloaded) from the viewer. Not used if the size is set (`width` and `height` is not None)
+        :param parent: Parent to add this item to. (runtime adding)
+        '''
+        if width is not None:
+            self.width = width
+        if height is not None:
+            self.width = height
+        if unload_height is not None:
+            self.unload_height = unload_height
+        if unload_width is not None:
+            self.unload_width = unload_width
+
+        if self.group:
+            try:  # If it was deleted with DPG
+                dpg.delete_item(self.group)
+            except Exception:
+                pass
         width, height = self.get_size()
         with dpg.group(parent=parent) as self.group:
-            dpg.bind_item_theme(self.group, self._theme)
+            dpg.bind_item_theme(self.group, self._get_theme())
             self._view_window = dpg.add_child_window(width=width,
                                                      height=height,
-                                                     no_scrollbar=True)
-            dpg.bind_item_handler_registry(self.group, self._handler)
-        self.change_status(self.info.is_loaded, self.info.texture_tag)
+                                                     no_scrollbar=True,
+                                                     parent=self.group)
+            dpg.bind_item_handler_registry(self.group, self._get_visible_handler())
+
+        if self.info:
+            self.change_status(self.info.is_loaded, self.info.texture_tag)
+        else:
+            self.change_status(True)
+
+    def change_status(self, image_load_status: ImageLoadStatus, texture_tag: TextureTag = None):
+        if texture_tag is None:
+            texture_tag = get_texture_plug()
+        self.texture_tag = texture_tag
+        if not self.group:  # If not created
+            return
+        try:  # If it was deleted with DPG
+            dpg.delete_item(self._view_window, children_only=True)
+            if image_load_status:
+                self._render_image()
+            else:
+                self._render_loading()
+        except Exception:
+            traceback.print_exc()
 
     def _render_loading(self):
         self.dpg_image = None
@@ -397,47 +604,35 @@ class ImageViewer:
         if self.image_handler:
             dpg.bind_item_handler_registry(self.dpg_image, self.image_handler)
 
-    def set_size(self, *, width: int = None, height: int = None):
-        self.width = width
-        self.height = height
-        width, height = self.get_size()
-        dpg.configure_item(self._view_window,
-                           width=width,
-                           height=height)
-        if not self.dpg_image:
-            return
-        dpg.configure_item(self.dpg_image,
-                           width=width,
-                           height=height)
-
-    def set_width(self, width: int = None):
-        self.set_size(width=width, height=self.height)
-
-    def set_height(self, height: int = None):
-        self.set_size(width=self.width, height=height)
-
-    def set_image_handler(self, handler: int | str):
-        self.image_handler = handler
-        if self.dpg_image:
-            dpg.bind_item_handler_registry(self.dpg_image, self.image_handler)
-
     def delete(self):
+        '''
+        Deletes everything that was created by this object,
+        namely: the viewer (DPG elements), handlers.
+        Also resets all variables (except `unload_width` and `unload_height`)
+        '''
         self.__del__()
 
     def __del__(self):
-        if self.deleted:
-            return
-        self.deleted = True
+        if self.group:
+            try:  # If it was deleted with DPG
+                dpg.delete_item(self.group)
+            except Exception:
+                pass
+        self.width = None
+        self.height = None
 
-        try:
-            dpg.delete_item(self.group)
-        except Exception:
-            pass
-
-        HandlerDeleter.add(self._handler)
-        self.info.unsubscribe(self.subscription_tag)
-
-        self.texture_tag = None  # noqa
-        self.info = None  # noqa
         self.group = None  # noqa
         self._view_window = None  # noqa
+        self.texture_tag = None  # noqa
+
+        if self.info:
+            self.info.unsubscribe(self.subscription_tag)
+
+        self.info = None  # noqa
+        self.subscription_tag = None  # noqa
+
+        if self._visible_handler:
+            HandlerDeleter.add(self._get_visible_handler())
+            self._visible_handler = None  # noqa
+        self.image_handler = None
+        self._controller = None

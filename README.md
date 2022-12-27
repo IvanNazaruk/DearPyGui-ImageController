@@ -78,7 +78,6 @@ image_viewer.set_image_handler(image_handler)
 ```
  
  ## TODO list
- - [ ] Small refactoring of ImageViewer
- - [ ] Complete the documentation and comments in the code
+ - [ ] Increase documentation
  - [ ] GIFs support
  
