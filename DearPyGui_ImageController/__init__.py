@@ -8,16 +8,18 @@ if TYPE_CHECKING:
 
 from PIL import Image
 
-from .controller import ImageViewer, ImageController, HandlerDeleter
-from .controller import default_image_controller
-from .controller import get_texture_plug, image_to_dpg_texture, set_texture_registry
+from .controller import Controller
+from .controller import default_controller
+from .tools import get_texture_plug, image_to_dpg_texture, set_texture_registry
+from .tools import HandlerDeleter
+from .viewers import ImageViewer
 
 
 def add_image(image: bytes | Path | SupportsRead[bytes] | Image,
               width: int = None,
               height: int = None,
               parent=0,
-              controller: ImageController = None) -> ImageViewer:
+              controller: Controller = None) -> ImageViewer:
     image_viewer = ImageViewer()
     image_viewer.set_controller(controller)
     image_viewer.load(image)

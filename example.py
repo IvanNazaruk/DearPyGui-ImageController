@@ -12,8 +12,8 @@ images_path = glob.glob(f"{path_to_images}/*.*")
 dpg.create_context()
 
 dpg_img.set_texture_registry(dpg.add_texture_registry(show=True))
-dpg_img.default_image_controller.max_inactive_time = 3
-dpg_img.default_image_controller.unloading_check_sleep_time = 1
+dpg_img.default_controller.max_inactive_time = 3
+dpg_img.default_controller.unloading_check_sleep_time = 1
 
 all_image_viewers: List[dpg_img.ImageViewer] = []
 
@@ -49,7 +49,7 @@ def load_image(path):
 
     try:
         image_viewer.load(path)
-        dpg.set_value("image_info", f"{path} | {image_viewer.info.width}x{image_viewer.info.height}")
+        dpg.set_value("image_info", f"{path} | {image_viewer.image.width}x{image_viewer.image.height}")
     except Exception as e:
         traceback.print_exc()
         image_viewer.unload()
