@@ -11,9 +11,12 @@ from . import tools
 
 if TYPE_CHECKING:
     from _typeshed import SupportsRead
+    from .controller import SubscriptionTag, ImageControllerType, ControllerType
+    from .tools import TextureTag
+
 import dearpygui.dearpygui as dpg
 
-from .controller import TextureTag, SubscriptionTag, ImageControllerType, ControllerType, default_controller
+from .controller import default_controller
 
 
 class ImageViewerCreator(ABC):
@@ -53,7 +56,7 @@ class ImageViewerCreator(ABC):
         self.__subscription_tag = self.__image_info.subscribe(self)  # noqa
         self.image = self.__image_info.image
 
-        if self.__image_info.is_loaded:
+        if self.__image_info.loaded:
             self.show(self.__image_info.texture_tag)
 
     def unload(self):
@@ -216,7 +219,7 @@ class ImageViewer(ImageViewerCreator):
                height: int = None,
                unload_width: int = None,
                unload_height: int = None,
-               parent=0):
+               parent: int | str = 0):
         """
         Creates a viewer in the DPG, if it has already been created,
         moves it to a new place (deletes the old).
@@ -282,7 +285,13 @@ class ImageViewer(ImageViewerCreator):
         else:
             width, height = self.get_size()
             dpg.configure_item(self._view_window, width=width, height=height)
+            self.dpg_image = dpg.add_image(tools.get_texture_plug(),
+                                           width=width,
+                                           height=height,
+                                           parent=self._view_window)
 
+            if self.image_handler:
+                dpg.bind_item_handler_registry(self.dpg_image, self.image_handler)
     def delete(self):
         """
         Deletes everything that was created by this object,

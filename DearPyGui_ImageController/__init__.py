@@ -18,7 +18,7 @@ from .viewers import ImageViewer
 def add_image(image: bytes | Path | SupportsRead[bytes] | Image,
               width: int = None,
               height: int = None,
-              parent=0,
+              parent: int | str = 0,
               controller: Controller = None) -> ImageViewer:
     image_viewer = ImageViewer()
     image_viewer.set_controller(controller)

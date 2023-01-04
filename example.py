@@ -30,7 +30,7 @@ def delete_all_images():
     for _ in range(len(all_image_viewers)):
         image_viewer = all_image_viewers.pop()
         image_viewer.delete()
-    dpg.delete_item("picture_group", children_only=True)
+    dpg.delete_item("image_group", children_only=True)
 
 
 def set_size():
@@ -42,6 +42,7 @@ image_viewer = dpg_img.ImageViewer(unload_width=1, unload_height=1)
 
 
 def load_image(path):
+    print(len(dpg_img.default_controller))
     if path == "{None}":
         image_viewer.unload()
         dpg.set_value("image_info", path)
