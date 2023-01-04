@@ -42,7 +42,6 @@ image_viewer = dpg_img.ImageViewer(unload_width=1, unload_height=1)
 
 
 def load_image(path):
-    print(len(dpg_img.default_controller))
     if path == "{None}":
         image_viewer.unload()
         dpg.set_value("image_info", path)
