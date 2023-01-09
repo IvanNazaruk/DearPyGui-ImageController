@@ -40,16 +40,17 @@ class ImageViewerCreator(ABC):
             return default_controller
         return self.__controller
 
-    def load(self, image: str | bytes | Path | SupportsRead[bytes] | Image = None):
+    def load(self, image: str | bytes | Path | SupportsRead[bytes] | Image = None, show_loading=False):
         self.image = None
-        self.hide()
+        if show_loading:
+            self.hide()
 
         if self.__image_info:
             self.__image_info.unsubscribe(self.__subscription_tag)
-            self.__image_info, self.__subscription_tag = None, None
+        self.__image_info, self.__subscription_tag = None, None
 
         if image is None:
-            return
+            return self.hide() if not show_loading else None
 
         controller = self.get_controller()
         _, self.__image_info = controller.add(image)
@@ -292,6 +293,7 @@ class ImageViewer(ImageViewerCreator):
 
             if self.image_handler:
                 dpg.bind_item_handler_registry(self.dpg_image, self.image_handler)
+
     def delete(self):
         """
         Deletes everything that was created by this object,

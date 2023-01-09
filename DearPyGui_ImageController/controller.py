@@ -87,6 +87,9 @@ class ImageController:
         self.texture_tag = texture_tag
         self.loaded = True
         self.loading = False
+        if len(self.subscribers) == 0:
+            self.unload()
+            return
         for image_viewer in self.subscribers.values():
             try:
                 image_viewer.show(self.texture_tag)  # noqa
