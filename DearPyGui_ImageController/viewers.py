@@ -235,7 +235,7 @@ class ImageViewer(ImageViewerCreator):
         if width is not None:
             self.width = width
         if height is not None:
-            self.width = height
+            self.height = height
         if unload_height is not None:
             self.unload_height = unload_height
         if unload_width is not None:
