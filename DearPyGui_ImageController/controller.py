@@ -6,8 +6,8 @@ import threading
 import time
 import traceback
 from pathlib import Path
-from typing import TYPE_CHECKING, Type
-from typing import TypeVar, Dict
+from typing import Dict, TypeVar
+from typing import Type, TYPE_CHECKING
 
 import dearpygui.dearpygui as dpg
 
@@ -116,27 +116,48 @@ class ImageController:
                 traceback.print_exc()
 
 
-class ImageUnloaderWorker:
+class Worker:
+    STOP = False
+    THREAD_RUNNING = False
+
+    def start_thread(self):
+        self.STOP = False
+        if self.THREAD_RUNNING:
+            return
+        self.THREAD_RUNNING = True
+
+        threading.Thread(target=self._loop, daemon=True).start()
+
+    def _loop(self):
+        while not self.STOP:
+            self.loop()
+
+    def loop(self):
+        ...
+
+    def stop(self):
+        self.STOP = True
+
+
+class ImageUnloaderWorker(Worker):
     def __init__(self, unload_queue: list[ImageController], controller: ControllerType):
         self.queue = unload_queue
         self.controller = controller
-        threading.Thread(target=self.loop, daemon=True).start()
+        self.start_thread()
 
     def loop(self):
-        while True:
-            time.sleep(self.controller.unloading_check_sleep_time)
-            for image_controller in self.queue:
-                if image_controller.is_unloading_time():
-                    image_controller.unload()
-                    self.queue.remove(image_controller)
+        for image_controller in self.queue:
+            if image_controller.is_unloading_time():
+                image_controller.unload()
+                self.queue.remove(image_controller)
+        time.sleep(self.controller.unloading_check_sleep_time)
 
 
-class ImageLoaderWorker:
-    STOP = False
+class ImageLoaderWorker(Worker):
 
     def __init__(self, loading_queue: queue.LifoQueue[ImageController]):
         self.queue = loading_queue
-        threading.Thread(target=self.loop, daemon=True).start()
+        self.start_thread()
 
     @staticmethod
     def load(image_controller: ImageController):
@@ -156,13 +177,12 @@ class ImageLoaderWorker:
         image_controller.loading = False
 
     def loop(self):
-        while not self.STOP:
-            image_controller = self.queue.get()
-            self.load(image_controller)
-            self.queue.task_done()
-
-    def stop(self):
-        self.STOP = False
+        image_controller = self.queue.get()
+        if self.STOP:
+            self.queue.put(image_controller)
+            return
+        self.load(image_controller)
+        self.queue.task_done()
 
 
 class Controller(Dict[ImageControllerTag, ImageController]):
@@ -178,17 +198,38 @@ class Controller(Dict[ImageControllerTag, ImageController]):
 
     max_inactive_time: int | float
     unloading_check_sleep_time: int | float
+    _disable_work_in_threads: bool = False
+    _last_time_unload_check: time.time = time.time()
+
+    @property
+    def disable_work_in_threads(self):
+        return self._disable_work_in_threads
+
+    @disable_work_in_threads.setter
+    def disable_work_in_threads(self, value: bool):
+        self._disable_work_in_threads = value
+        for worker in self.loading_workers:
+            if value:
+                worker.stop()
+            else:
+                worker.start_thread()
+        if value:
+            self.unloading_worker.stop()
+        else:
+            self.unloading_worker.start_thread()
 
     def __init__(self,
-                 max_inactive_time: int = 4,
-                 unloading_check_sleep_time: int | float = 1,
+                 max_inactive_time: int = 10,
+                 unloading_check_sleep_time: int | float = 2,
                  number_image_loader_workers: int = 2,
-                 queue_max_size: int = None):
+                 queue_max_size: int = None,
+                 disable_work_in_threads: bool = False):
         """
         :param max_inactive_time: Time in seconds after which the picture will be unloaded from the DPG/RAM, If last time visible is not updated
         :param unloading_check_sleep_time: In this number of seconds the last visibility of the image will be checked
         :param number_image_loader_workers: Number of simultaneous loading of images
         :param queue_max_size: If not set, it will be equal to number_image_loader_workers * 2
+        :param disable_work_in_threads: Disables multi-threaded image un/loading, you have to use the `.load_images`/'.unload_images' function to un/load the images yourself
         """
         super().__init__()
 
@@ -206,6 +247,7 @@ class Controller(Dict[ImageControllerTag, ImageController]):
 
         self.unload_queue = []
         self.unloading_worker = ImageUnloaderWorker(self.unload_queue, self)
+        self.disable_work_in_threads = disable_work_in_threads
 
     def add(self, image: str | bytes | Path | SupportsRead[bytes] | Image) -> tuple[ImageControllerTag, ImageController]:
         """
@@ -234,6 +276,51 @@ class Controller(Dict[ImageControllerTag, ImageController]):
 
         self[image_tag] = image_info
         return image_tag, image_info
+
+    def load_images(self, max_count: int = None):
+        """
+        Only works if `.disable_load_in_threads` == False.
+        Loads images to the DPG that are in the queue to be displayed.
+
+        :param max_count: (None - inf) Maximum number of images that can be loaded
+        """
+        if not self.disable_work_in_threads:
+            return
+
+        while self.loading_queue.not_empty:
+            if max_count is not None:
+                max_count -= 1
+                if max_count < 0:
+                    return
+
+            try:
+                image_controller = self.loading_queue.get(block=False)
+            except queue.Empty:
+                return
+
+            ImageLoaderWorker.load(image_controller)
+
+    def unload_images(self, max_count: int = None):
+        """
+        Only works if `.disable_load_in_threads` == False.
+        Unloads loaded images (textures) from the DPG that are in the remove queue.
+
+        :param max_count: (None - inf) Maximum number of images that can be uploaded
+        """
+        if not self.disable_work_in_threads:
+            return
+        if time.time() - self._last_time_unload_check < self.unloading_check_sleep_time:
+            return
+        self._last_time_unload_check = time.time()
+
+        for image_controller in self.unload_queue:
+            if image_controller.is_unloading_time():
+                if max_count is not None:
+                    max_count -= 1
+                    if max_count < 0:
+                        return
+                image_controller.unload()
+                self.unload_queue.remove(image_controller)
 
 
 default_controller = Controller()

@@ -24,7 +24,7 @@ except ModuleNotFoundError:
     def _image_to_1d_array(image: Image) -> list:
         img_1D_array = []
         image_data = image.getdata()
-        if len(image_data) == 3:
+        if image_data.bands == 3:
             for pixel in image_data:
                 img_1D_array.extend((pixel[0] / 255, pixel[1] / 255, pixel[2] / 255, 1))
         else:
