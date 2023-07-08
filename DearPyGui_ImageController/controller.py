@@ -1,25 +1,24 @@
 from __future__ import annotations
 
-import hashlib
+import contextlib
 import queue
 import threading
 import time
 import traceback
 from pathlib import Path
-from typing import Dict, TypeVar
 from typing import Type, TYPE_CHECKING
+from typing import TypeVar
 
 import dearpygui.dearpygui as dpg
+from PIL import Image as img
+from PIL.Image import LANCZOS, Image
+
+from . import tools
 
 if TYPE_CHECKING:
     from _typeshed import SupportsRead
     from .viewers import ImageViewerCreator
     from .tools import TextureTag
-
-from PIL import Image as img
-from PIL.Image import Image
-
-from . import tools
 
 ImageControllerTag = TypeVar('ImageControllerTag', bound=str)
 ImageLoadStatus = TypeVar('ImageLoadStatus', bound=bool)
@@ -27,11 +26,13 @@ ControllerType = TypeVar('ControllerType', bound="Controller")
 SubscriptionTag = TypeVar('SubscriptionTag', bound=int)
 ImageControllerType = TypeVar('ImageControllerType', bound="ImageController")
 
+T_ImageViewerCreator = TypeVar('T_ImageViewerCreator', bound='ImageViewerCreator')
+
 
 class ImageController:
     image: Image | None = None
     tag_in_controller: ImageControllerTag
-    subscribers: Dict[SubscriptionTag, Type[ImageViewerCreator]]
+    subscribers: dict[SubscriptionTag, Type[T_ImageViewerCreator]]
     # Tag an already loaded DPG texture with this picture.
     # If loaded is False, the texture plug will be used.
     texture_tag: TextureTag
@@ -45,7 +46,7 @@ class ImageController:
         self.image = image
         self.tag_in_controller = tag_in_controller
         self.controller = controller
-        self.subscribers = dict()
+        self.subscribers = {}
         self.texture_tag = tools.get_texture_plug()
 
     def subscribe(self, image_viewer: Type[ImageViewerCreator]) -> SubscriptionTag:
@@ -77,11 +78,16 @@ class ImageController:
         if self.loaded or self.image is None:
             return
         if not self.loading:
-            try:
+            with contextlib.suppress(queue.Full):
                 self.controller.loading_queue.put_nowait(self)
                 self.loading = True
-            except queue.Full:
-                pass
+
+    def now_loading(self):
+        for image_viewer in self.subscribers.values():
+            try:
+                image_viewer.now_loading()
+            except Exception:
+                traceback.print_exc()
 
     def load(self, texture_tag: TextureTag):
         self.texture_tag = texture_tag
@@ -167,6 +173,7 @@ class ImageLoaderWorker(Worker):
             image_controller.loading = False
             return
 
+        image_controller.now_loading()
         try:
             image_controller.load(
                 tools.image_to_dpg_texture(image_controller.image)
@@ -185,7 +192,7 @@ class ImageLoaderWorker(Worker):
         self.queue.task_done()
 
 
-class Controller(Dict[ImageControllerTag, ImageController]):
+class Controller(dict[ImageControllerTag, ImageController]):
     """
     Stores all hash pictures and associates it with ImageController.
     Also with the help of workers loads images into the DPG
@@ -220,7 +227,7 @@ class Controller(Dict[ImageControllerTag, ImageController]):
 
     def __init__(self,
                  max_inactive_time: int = 10,
-                 unloading_check_sleep_time: int | float = 2,
+                 unloading_check_sleep_time: int | float = 2.5,
                  number_image_loader_workers: int = 2,
                  queue_max_size: int = None,
                  disable_work_in_threads: bool = False):
@@ -239,12 +246,10 @@ class Controller(Dict[ImageControllerTag, ImageController]):
             queue_max_size = number_image_loader_workers * 2
 
         self.loading_queue = queue.LifoQueue(maxsize=queue_max_size)
-        self.loading_workers = []
-        for _ in range(number_image_loader_workers):
-            self.loading_workers.append(
-                ImageLoaderWorker(self.loading_queue)
-            )
-
+        self.loading_workers = [
+            ImageLoaderWorker(self.loading_queue)
+            for _ in range(number_image_loader_workers)
+        ]
         self.unload_queue = []
         self.unloading_worker = ImageUnloaderWorker(self.unload_queue, self)
         self.disable_work_in_threads = disable_work_in_threads
@@ -255,26 +260,26 @@ class Controller(Dict[ImageControllerTag, ImageController]):
         :return:
         """
 
-        if isinstance(image, str):
-            image_tag = hashlib.md5(image.encode()).hexdigest()
+        if not isinstance(image, Image):
             image = img.open(image)
-        elif isinstance(image, Image):
-            image_tag = hashlib.md5(image.tobytes()).hexdigest()  # TODO: Better hash function
-        else:
-            raise ValueError(f"href must be an Image or str, not {type(image)}")
+        image: Image
+
+        # Image hash calculation: https://web.archive.org/web/20171112054354/https://www.safaribooksonline.com/blog/2013/11/26/image-hashing-with-python/
+        hash_image = image.resize((12, 12), LANCZOS).convert('L')
+        pixels = list(hash_image.getdata())
+        avg = sum(pixels) / len(pixels)
+        bits = "".join(map(lambda pixel: '1' if pixel < avg else '0', pixels))
+        image_tag = int(bits, 2).__format__('016x').upper()
 
         # Checking if an image has already been added
-        image_info = self.get(image_tag, None)
-        if image_info:
+        if image_info := self.get(image_tag):
             return image_tag, image_info
 
-        image_info = ImageController(
+        image_info = self[image_tag] = ImageController(
             image=image,
             tag_in_controller=image_tag,
             controller=self
         )
-
-        self[image_tag] = image_info
         return image_tag, image_info
 
     def load_images(self, max_count: int = None):

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import threading
-from typing import TypeVar
-
+import contextlib
 import dearpygui.dearpygui as dpg
+import threading
 from PIL.Image import Image
+from typing import TypeVar
 
 TextureTag = TypeVar('TextureTag', bound=int)
 
@@ -101,9 +101,7 @@ class HandlerDeleter:
                 dpg.split_frame()
 
             for handler in deletion_queue:
-                try:
+                with contextlib.suppress(Exception):
                     dpg.delete_item(handler)
-                except Exception:
-                    pass
             del deletion_queue
         cls.__thread = False

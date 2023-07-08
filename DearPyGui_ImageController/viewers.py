@@ -1,22 +1,23 @@
 from __future__ import annotations
 
+import contextlib
 import traceback
 from abc import ABC, abstractmethod
+from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import dearpygui.dearpygui as dpg
 from PIL.Image import Image
 
 from . import tools
+from .controller import default_controller
 
 if TYPE_CHECKING:
+    from typing import Self
     from _typeshed import SupportsRead
     from .controller import SubscriptionTag, ImageControllerType, ControllerType
     from .tools import TextureTag
-
-import dearpygui.dearpygui as dpg
-
-from .controller import default_controller
 
 
 class ImageViewerCreator(ABC):
@@ -36,9 +37,7 @@ class ImageViewerCreator(ABC):
         self.__controller = controller
 
     def get_controller(self) -> ControllerType:
-        if self.__controller is None:
-            return default_controller
-        return self.__controller
+        return default_controller if self.__controller is None else self.__controller
 
     def load(self, image: str | bytes | Path | SupportsRead[bytes] | Image = None, show_loading=False):
         self.image = None
@@ -50,7 +49,9 @@ class ImageViewerCreator(ABC):
         self.__image_info, self.__subscription_tag = None, None
 
         if image is None:
-            return self.hide() if not show_loading else None
+            return None if show_loading else self.hide()
+        if show_loading:
+            self.create_loading_indicator()
 
         controller = self.get_controller()
         _, self.__image_info = controller.add(image)
@@ -67,8 +68,14 @@ class ImageViewerCreator(ABC):
         if self.__image_info:
             self.__image_info.update_last_time_visible()
 
+    def create_loading_indicator(self):
+        ...
+
+    def now_loading(self):
+        ...
+
     @abstractmethod
-    def show(self, texture_tag: TextureTag):
+    def show(self, texture_tag: TextureTag) -> 'Self':
         ...
 
     @abstractmethod
@@ -87,7 +94,6 @@ class ImageViewerCreator(ABC):
 class ImageViewer(ImageViewerCreator):
     width: int | None = None
     height: int | None = None
-    _theme: int = None
 
     group: int = None
     _view_window: int = None
@@ -97,16 +103,16 @@ class ImageViewer(ImageViewerCreator):
     image_handler: int | str | None = None
 
     @classmethod
+    @cache
     def _get_theme(cls) -> int:
-        if cls._theme is None:
-            with dpg.theme() as cls._theme:
-                with dpg.theme_component(dpg.mvAll, parent=cls._theme) as theme_component:
-                    dpg.add_theme_style(dpg.mvStyleVar_WindowPadding, 0, 0, category=dpg.mvThemeCat_Core, parent=theme_component)
-                    dpg.add_theme_style(dpg.mvStyleVar_FramePadding, 0, 0, category=dpg.mvThemeCat_Core, parent=theme_component)
-                    dpg.add_theme_style(dpg.mvStyleVar_CellPadding, 0, 0, category=dpg.mvThemeCat_Core, parent=theme_component)
-                    dpg.add_theme_style(dpg.mvStyleVar_ItemSpacing, 0, 0, category=dpg.mvThemeCat_Core, parent=theme_component)
-                    dpg.add_theme_style(dpg.mvStyleVar_ChildBorderSize, 0, category=dpg.mvThemeCat_Core, parent=theme_component)
-        return cls._theme
+        with dpg.theme() as theme:
+            with dpg.theme_component(dpg.mvAll, parent=theme) as theme_component:
+                dpg.add_theme_style(dpg.mvStyleVar_WindowPadding, 0, 0, category=dpg.mvThemeCat_Core, parent=theme_component)
+                dpg.add_theme_style(dpg.mvStyleVar_FramePadding, 0, 0, category=dpg.mvThemeCat_Core, parent=theme_component)
+                dpg.add_theme_style(dpg.mvStyleVar_CellPadding, 0, 0, category=dpg.mvThemeCat_Core, parent=theme_component)
+                dpg.add_theme_style(dpg.mvStyleVar_ItemSpacing, 0, 0, category=dpg.mvThemeCat_Core, parent=theme_component)
+                dpg.add_theme_style(dpg.mvStyleVar_ChildBorderSize, 0, category=dpg.mvThemeCat_Core, parent=theme_component)
+        return theme
 
     def _get_visible_handler(self) -> int:
         if not self._visible_handler:
@@ -114,7 +120,7 @@ class ImageViewer(ImageViewerCreator):
                 dpg.add_item_visible_handler(callback=self.update_last_time_visible, parent=self._visible_handler)
         return self._visible_handler
 
-    def get_size(self) -> (int, int):
+    def get_size(self) -> tuple[int, int]:
         if self.width and self.height:
             return self.width, self.height
         if not self.image:
@@ -132,11 +138,11 @@ class ImageViewer(ImageViewerCreator):
             width = int(self.image.width * (self.height / self.image.height))
             return width, self.height
 
-    def set_size(self, *, width: int = None, height: int = None):
+    def set_size(self, *, width: int = None, height: int = None) -> 'Self':
         """
         Set the size of the viewer when the image is loaded in the viewer
         (is also used when dimensions are set and do not equal None).
-        If the dimensions are None the size of the picture will be used.
+        If the dimensions are None, the size of the picture will be used.
         If one of the dimensions is None, it will be proportionally
         changed in the ratio of the image size to the other dimension.
         If a viewer is created, the changes are applied instantly.
@@ -159,22 +165,23 @@ class ImageViewer(ImageViewerCreator):
                                    height=height)
         except Exception:
             traceback.print_exc()
+        return self
 
-    def set_width(self, width: int = None):
+    def set_width(self, width: int = None) -> 'Self':
         """
         It uses the function `.set_size` and only sets the width, the width will not be changed
 
         :param width: Viewer width. Used when the image is loaded in the viewer or another dimension is also set
         """
-        self.set_size(width=width, height=self.height)
+        return self.set_size(width=width, height=self.height)
 
-    def set_height(self, height: int = None):
+    def set_height(self, height: int = None) -> 'Self':
         """
         It uses the function `.set_size` and only sets the height, the width will not be changed
 
         :param height: Viewer height. Used when the image is loaded in the viewer or another dimension is also set
         """
-        self.set_size(width=self.width, height=height)
+        return self.set_size(width=self.width, height=height)
 
     def __init__(self,
                  image: str | bytes | Path | SupportsRead[bytes] | Image = None,
@@ -200,7 +207,7 @@ class ImageViewer(ImageViewerCreator):
         if image:
             self.load(image)
 
-    def set_image_handler(self, handler: int | str = None):
+    def set_image_handler(self, handler: int | str = None) -> 'Self':
         """
         Set the DPG handler on the image.
         It will work even if the image is not loaded into the viewer.
@@ -210,17 +217,16 @@ class ImageViewer(ImageViewerCreator):
         """
         self.image_handler = handler
         if self.dpg_image:
-            try:
+            with contextlib.suppress(Exception):
                 dpg.bind_item_handler_registry(self.dpg_image, self.image_handler)
-            except Exception:
-                pass
+        return self
 
     def create(self,
                width: int = None,
                height: int = None,
                unload_width: int = None,
                unload_height: int = None,
-               parent: int | str = 0):
+               parent: int | str = 0) -> 'Self':
         """
         Creates a viewer in the DPG, if it has already been created,
         moves it to a new place (deletes the old).
@@ -242,10 +248,9 @@ class ImageViewer(ImageViewerCreator):
             self.unload_width = unload_width
 
         if self.group:
-            try:  # If it was deleted with DPG
+            with contextlib.suppress(Exception):  # If it was deleted with DPG
                 dpg.delete_item(self.group)
-            except Exception:
-                pass
+
         width, height = self.get_size()
         with dpg.group(parent=parent) as self.group:
             dpg.bind_item_theme(self.group, self._get_theme())
@@ -259,8 +264,9 @@ class ImageViewer(ImageViewerCreator):
             self.hide()
         else:
             self.show(self.texture_tag)
+        return self
 
-    def show(self, texture_tag: TextureTag):
+    def show(self, texture_tag: TextureTag) -> 'Self':
         self.texture_tag = texture_tag
         if not self.group:  # If not created
             return
@@ -274,16 +280,26 @@ class ImageViewer(ImageViewerCreator):
                                        parent=self._view_window)
         if self.image_handler:
             dpg.bind_item_handler_registry(self.dpg_image, self.image_handler)
+        return self
 
-    def hide(self):
+    def create_loading_indicator(self):
+        dpg.add_loading_indicator(parent=self._view_window)
+
+    def now_loading(self):
+        with contextlib.suppress(Exception):
+            if elements := dpg.get_item_children(self._view_window, 1):
+                dpg.configure_item(elements[0], color=(0, 255, 0))
+
+    def hide(self) -> 'Self':
         self.texture_tag = tools.get_texture_plug()
         if not self.group:  # If not created
             return
         self.dpg_image = None
+
         dpg.delete_item(self._view_window, children_only=True)
         if self.image:
-            dpg.add_loading_indicator(parent=self._view_window)
-        else:
+            self.create_loading_indicator()
+
             width, height = self.get_size()
             dpg.configure_item(self._view_window, width=width, height=height)
             self.dpg_image = dpg.add_image(tools.get_texture_plug(),
@@ -293,6 +309,7 @@ class ImageViewer(ImageViewerCreator):
 
             if self.image_handler:
                 dpg.bind_item_handler_registry(self.dpg_image, self.image_handler)
+        return self
 
     def delete(self):
         """
@@ -304,10 +321,8 @@ class ImageViewer(ImageViewerCreator):
 
     def __del__(self):
         if self.group:
-            try:  # If it was deleted with DPG
+            with contextlib.suppress(Exception):  # If it was deleted with DPG
                 dpg.delete_item(self.group)
-            except Exception:
-                pass
         self.width = None
         self.height = None
 
