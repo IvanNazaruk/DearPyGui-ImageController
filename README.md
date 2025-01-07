@@ -12,8 +12,10 @@ https://user-images.githubusercontent.com/46572469/208324280-9e2e02a1-0479-433c-
 
 
 ## How to use it?
-0) Download the library(`git clone https://github.com/IvanNazaruk/DearPyGui-ImageController`) and move the `DearPyGui_ImageController` folder to your project/script
-
+0) install the library
+```shell
+pip install git+https://github.com/IvanNazaruk/DearPyGui-ImageController
+```
 1) Import the library:
 ```python
 import DearPyGui_ImageController as dpg_img
