@@ -34,11 +34,17 @@ class ImageController:
     image: Image | None = None
     tag_in_controller: ImageControllerTag
     subscribers: dict[SubscriptionTag, Type[T_ImageViewerCreator]]
-    # Tag an already loaded DPG texture with this picture.
+    # Tag of the DPG texture shown now (the current frame).
     # If loaded is False, the texture plug will be used.
     texture_tag: TextureTag
 
     texture_size: tuple[int, int] | None = None
+    frame_count: int = 1
+    # One texture per frame; a still image has one
+    frame_textures: list[TextureTag]
+    frame_durations: list[float]
+    frame_index: int = 0
+    next_frame_time: float = 0
 
     last_time_visible: time.time = 0
 
@@ -47,13 +53,18 @@ class ImageController:
 
     # When a view grows past the texture, the new texture is this much bigger, so resizing step by step doesn't rebuild it every time
     grow_headroom = 1.5
+    # An animation stops when the image has not been visible for this many seconds
+    animation_visible_timeout = 0.5
 
-    def __init__(self, image: Image, tag_in_controller: ImageControllerTag, controller: ControllerType):
+    def __init__(self, image: Image, tag_in_controller: ImageControllerTag, controller: ControllerType, frame_count: int = 1):
         self.image = image
         self.tag_in_controller = tag_in_controller
         self.controller = controller
+        self.frame_count = frame_count
         self.subscribers = {}
         self.texture_tag = tools.get_texture_plug()
+        self.frame_textures = []
+        self.frame_durations = []
 
     def subscribe(self, image_viewer: Type[ImageViewerCreator]) -> SubscriptionTag:
         subscription_tag = dpg.generate_uuid()
@@ -65,9 +76,9 @@ class ImageController:
             del self.subscribers[subscription_tag]
         if len(self.subscribers) == 0:
             del self.controller[self.tag_in_controller]
+            self.unload()
             self.image = None
             self.controller = None
-            self.unload()
 
     def get_needed_texture_size(self, scale: float = 1) -> tuple[int, int]:
         view_sizes = []
@@ -78,7 +89,7 @@ class ImageController:
                 break
             view_sizes.append(get_size())
         size = tools.get_texture_size(self.image.size, view_sizes, scale)
-        return tools.fit_to_byte_limit(size, max_bytes=self.controller.max_texture_bytes)
+        return tools.fit_to_byte_limit(size, self.frame_count, self.controller.max_texture_bytes)
 
     def needs_bigger_texture(self) -> bool:
         if not self.loaded or self.image is None or self.texture_size is None:
@@ -115,10 +126,14 @@ class ImageController:
             except Exception:
                 traceback.print_exc()
 
-    def load(self, texture_tag: TextureTag, texture_size: tuple[int, int] = None):
-        old_texture_tag = self.texture_tag
+    def load(self, frame_textures: list[TextureTag], frame_durations: list[float], texture_size: tuple[int, int] = None):
         with dpg.mutex():
-            self.texture_tag = texture_tag
+            old_textures = self.frame_textures
+            self.frame_textures = frame_textures
+            self.frame_durations = frame_durations
+            self.frame_index = 0
+            self.next_frame_time = time.time() + frame_durations[0]
+            self.texture_tag = frame_textures[0]
             self.texture_size = texture_size
             self.loaded = True
             self.loading = False
@@ -130,30 +145,55 @@ class ImageController:
                         image_viewer.show(self.texture_tag)  # noqa
                     except Exception:
                         traceback.print_exc()
-            # Delete the previous (smaller) texture only after the viewers have switched to the new one
-            if old_texture_tag not in (tools.get_texture_plug(), texture_tag):
+            # Delete the previous (smaller) textures only after the viewers have switched to the new ones
+            for texture in old_textures:
                 with contextlib.suppress(Exception):
-                    dpg.delete_item(old_texture_tag)
+                    dpg.delete_item(texture)
         if self.image and self not in self.controller.unload_queue:
             self.controller.unload_queue.append(self)
+        if self.loaded and self.image and len(frame_textures) > 1:
+            self.controller.add_animation(self)
 
     def unload(self):
-        old_texture_tag = self.texture_tag
-        self.texture_tag = tools.get_texture_plug()
-        self.texture_size = None
-        self.loaded = False
-        self.loading = False
-        for image_viewer in self.subscribers.values():
-            try:
-                image_viewer.hide()  # noqa
-            except Exception:
-                traceback.print_exc()
+        with dpg.mutex():
+            old_textures = self.frame_textures
+            self.frame_textures = []
+            self.frame_durations = []
+            self.texture_tag = tools.get_texture_plug()
+            self.texture_size = None
+            self.loaded = False
+            self.loading = False
+            for image_viewer in self.subscribers.values():
+                try:
+                    image_viewer.hide()  # noqa
+                except Exception:
+                    traceback.print_exc()
+            for texture in old_textures:
+                with contextlib.suppress(Exception):
+                    dpg.delete_item(texture)
+        if self.controller:
+            self.controller.remove_animation(self)
 
-        if old_texture_tag != tools.get_texture_plug():
-            try:
-                dpg.delete_item(old_texture_tag)
-            except Exception:
-                traceback.print_exc()
+    def animate(self, now: float):
+        """Shows the next frame if its time has come and the image is visible"""
+        if len(self.frame_textures) < 2 or now - self.last_time_visible > self.animation_visible_timeout:
+            return
+        if now < self.next_frame_time:
+            return
+        if now - self.next_frame_time > 1:  # Was not visible for a while: continue from now instead of catching up
+            self.next_frame_time = now
+        with dpg.mutex():
+            if len(self.frame_textures) < 2:  # Unloaded meanwhile
+                return
+            while self.next_frame_time <= now:
+                self.frame_index = (self.frame_index + 1) % len(self.frame_textures)
+                self.next_frame_time += self.frame_durations[self.frame_index]
+            self.texture_tag = self.frame_textures[self.frame_index]
+            for image_viewer in list(self.subscribers.values()):
+                try:
+                    image_viewer.set_frame(self.texture_tag)
+                except Exception:
+                    traceback.print_exc()
 
 
 class Worker:
@@ -192,6 +232,15 @@ class ImageUnloaderWorker(Worker):
         time.sleep(self.controller.unloading_check_sleep_time)
 
 
+class AnimationWorker(Worker):
+    def __init__(self, controller: ControllerType):
+        self.controller = controller
+
+    def loop(self):
+        self.controller.animate()
+        time.sleep(0.01)
+
+
 class ImageLoaderWorker(Worker):
 
     def __init__(self, loading_queue: queue.LifoQueue[ImageController]):
@@ -208,11 +257,18 @@ class ImageLoaderWorker(Worker):
 
         if not growing:
             image_controller.now_loading()
+        textures, durations = [], []
         try:
             size = image_controller.get_needed_texture_size(image_controller.grow_headroom if growing else 1)
-            image_controller.load(tools.image_to_dpg_texture(image_controller.image, size), size)
+            for frame, duration in tools.iter_frames(image_controller.image):
+                textures.append(tools.image_to_dpg_texture(frame, size))
+                durations.append(duration)
+            image_controller.load(textures, durations, size)
         except Exception:  # TODO: ValueError: Operation on closed image
             traceback.print_exc()
+            for texture in textures:
+                with contextlib.suppress(Exception):
+                    dpg.delete_item(texture)
 
         image_controller.loading = False
 
@@ -252,9 +308,12 @@ class Controller(dict[ImageControllerTag, ImageController]):
         if value:
             for worker in self._workers():
                 worker.stop()
+            self.animation_worker.stop()
         elif self._threads_started:
             for worker in self._workers():
                 worker.start_thread()
+            if self.animated_images:
+                self.animation_worker.start_thread()
 
     def _workers(self) -> list[Worker]:
         return [*self.loading_workers, self.unloading_worker]
@@ -297,6 +356,8 @@ class Controller(dict[ImageControllerTag, ImageController]):
         ]
         self.unload_queue = []
         self.unloading_worker = ImageUnloaderWorker(self.unload_queue, self)
+        self.animated_images = []
+        self.animation_worker = AnimationWorker(self)
         self._threads_started = False
         self._disable_work_in_threads = disable_work_in_threads
 
@@ -313,7 +374,9 @@ class Controller(dict[ImageControllerTag, ImageController]):
 
         image_hash = hashlib.blake2b(digest_size=16)
         image_hash.update(f'{image.mode} {image.size}'.encode())
-        image_hash.update(image.tobytes())
+        for frame, duration in tools.iter_frames(image):
+            image_hash.update(frame.tobytes())
+            image_hash.update(str(duration).encode())
         image_tag = image_hash.hexdigest()
 
         # Checking if an image has already been added
@@ -323,9 +386,29 @@ class Controller(dict[ImageControllerTag, ImageController]):
         image_info = self[image_tag] = ImageController(
             image=image,
             tag_in_controller=image_tag,
-            controller=self
+            controller=self,
+            frame_count=tools.get_frame_count(image)
         )
         return image_tag, image_info
+
+    def add_animation(self, image_controller: ImageController):
+        if image_controller not in self.animated_images:
+            self.animated_images.append(image_controller)
+        if not self._disable_work_in_threads:
+            self.animation_worker.start_thread()
+
+    def remove_animation(self, image_controller: ImageController):
+        with contextlib.suppress(ValueError):
+            self.animated_images.remove(image_controller)
+
+    def animate(self):
+        """
+        Switches frames of visible animated images (GIF, APNG, animated WebP).
+        The animation thread calls it; with `disable_work_in_threads` call it yourself every frame.
+        """
+        now = time.time()
+        for image_controller in list(self.animated_images):
+            image_controller.animate(now)
 
     def load_images(self, max_count: int = None):
         """

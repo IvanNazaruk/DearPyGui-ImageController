@@ -82,6 +82,10 @@ image_viewer.set_image_handler(image_handler)
  - ### Textures are only as big as the view
  If a viewer has a width or height set and it is smaller than the image, the DPG texture is created at the view size, not the full image size. This saves video memory and loading time. If the viewer later grows past the texture, the texture is rebuilt 1.5x bigger (never bigger than the image), so resizing step by step doesn't rebuild it every time. A viewer without a set size still gets the full-size texture.
 
+ - ### Animations (GIF, APNG, animated WebP)
+ Animated images play automatically while they are visible and stop when they are not. Every frame is a separate texture, so an animation takes `frames` times more memory than a still image; use `max_texture_bytes` (below) to cap it.
+ If you set `disable_work_in_threads = True`, call `dpg_img.default_controller.animate()` every frame next to `load_images()` and `unload_images()` (see [example2.py](example2.py)).
+
  - ### How to limit the memory of one image?
  DPG stores every texture pixel as 4 floats (16 bytes), so a 1920x1080 picture takes about 33 MB. Set a limit per image (all frames of an animation together) and bigger images are loaded at a lower resolution, keeping proportions:
 ```python
@@ -91,5 +95,5 @@ dpg_img.default_controller.max_texture_bytes = 16 * 1024 * 1024  # 16 MB per ima
 
  ## TODO list
  - [ ] Increase documentation
- - [ ] GIFs support
+ - [x] GIFs support (also APNG and animated WebP)
  

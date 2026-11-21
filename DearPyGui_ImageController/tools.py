@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import dearpygui.dearpygui as dpg
 import threading
+from typing import Iterator
 from PIL.Image import Image, LANCZOS
 from typing import Iterable, TypeVar
 
@@ -41,6 +42,42 @@ def get_texture_plug() -> TextureTag:
                                               default_value=[0] * 4,
                                               parent=texture_registry)
     return texture_plug
+
+
+# MPO (phone JPEG) and multi-page TIFF also have several frames, but they are not animations
+ANIMATED_FORMATS = ('GIF', 'PNG', 'WEBP')
+
+
+def get_frame_count(image: Image) -> int:
+    if image.format in ANIMATED_FORMATS and getattr(image, 'is_animated', False):
+        return image.n_frames
+    return 1
+
+
+def get_frame_duration(image: Image) -> float:
+    """Current frame duration in seconds. Like browsers, delays of 10 ms or less are shown as 100 ms"""
+    duration = image.info.get('duration') or 0
+    return (duration if duration > 10 else 100) / 1000
+
+
+_frames_lock_creation = threading.Lock()
+
+
+def iter_frames(image: Image) -> Iterator[tuple[Image, float]]:
+    """
+    Yields (frame, duration in seconds) for every frame by seeking the image itself.
+    Locks the image while iterating and seeks it back to the first frame at the end.
+    """
+    with _frames_lock_creation:
+        lock = image.__dict__.setdefault('_dpg_frames_lock', threading.Lock())
+    with lock:
+        try:
+            for index in range(get_frame_count(image)):
+                image.seek(index)
+                image.load()  # WebP sets the frame duration only when the frame is loaded
+                yield image, get_frame_duration(image)
+        finally:
+            image.seek(0)
 
 
 BYTES_PER_PIXEL = 16  # DPG keeps texture pixels as 4 float32 values (RGBA)

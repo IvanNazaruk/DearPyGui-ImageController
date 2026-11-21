@@ -29,6 +29,7 @@ dpg.show_viewport()
 while dpg.is_dearpygui_running():
     dpg_img.default_controller.load_images(max_count=1)
     dpg_img.default_controller.unload_images(max_count=1)
+    dpg_img.default_controller.animate()
 
     dpg.render_dearpygui_frame()
 dpg.destroy_context()

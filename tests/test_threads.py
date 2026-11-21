@@ -26,6 +26,24 @@ def test_first_image_starts_threads():
     assert count_threads("dpg_img.default_controller.add(Image.new('RGB', (4, 4)))") == 3
 
 
+def test_animated_image_starts_animation_thread(tmp_path):
+    path = (tmp_path / 'a.gif').as_posix()
+    Image_ = __import__('PIL.Image', fromlist=['Image'])
+    frames = [Image_.new('RGB', (4, 4), color) for color in ('red', 'blue')]
+    frames[0].save(path, save_all=True, append_images=frames[1:], duration=50)
+    assert count_threads(f'''
+        import time
+        with dpg.window():
+            dpg_img.add_image({path!r})
+        dpg.create_viewport()
+        dpg.setup_dearpygui()
+        dpg.show_viewport()
+        end = time.time() + 1
+        while time.time() < end:
+            dpg.render_dearpygui_frame()
+    ''') == 4
+
+
 def test_disabled_before_first_image_starts_no_threads():
     assert count_threads('''
         dpg_img.default_controller.disable_work_in_threads = True

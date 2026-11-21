@@ -82,6 +82,10 @@ class ImageViewerCreator(ABC):
     def hide(self):
         ...
 
+    def set_frame(self, texture_tag: TextureTag):
+        """Shows the next frame of an animation"""
+        self.show(texture_tag)
+
     def __del__(self):
         if self.__image_info:
             self.__image_info.unsubscribe(self.__subscription_tag)
@@ -281,6 +285,11 @@ class ImageViewer(ImageViewerCreator):
         if self.image_handler:
             dpg.bind_item_handler_registry(self.dpg_image, self.image_handler)
         return self
+
+    def set_frame(self, texture_tag: TextureTag):
+        self.texture_tag = texture_tag
+        if self.dpg_image:
+            dpg.configure_item(self.dpg_image, texture_tag=texture_tag)
 
     def create_loading_indicator(self):
         dpg.add_loading_indicator(parent=self._view_window)
