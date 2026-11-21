@@ -21,17 +21,8 @@ except ModuleNotFoundError:
     logger.warning("numpy not installed. In DPG images will take longer to load (about 8 times slower).")
 
 
-    def _image_to_1d_array(image: Image) -> list:
-        img_1D_array = []
-        image_data = image.getdata()
-        if image_data.bands == 3:
-            for pixel in image_data:
-                img_1D_array.extend((pixel[0] / 255, pixel[1] / 255, pixel[2] / 255, 1))
-        else:
-            for pixel in image_data:
-                img_1D_array.extend((pixel[0] / 255, pixel[1] / 255, pixel[2] / 255, pixel[3] / 255))
-        del image_data
-        return img_1D_array
+    def _image_to_1d_array(image: Image) -> list:  # image is always RGBA here
+        return [value / 255 for value in image.tobytes()]
 
 texture_registry: int | str = 0
 texture_plug: TextureTag = None  # noqa
