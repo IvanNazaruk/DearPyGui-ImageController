@@ -153,7 +153,7 @@ class ImageUnloaderWorker(Worker):
         self.start_thread()
 
     def loop(self):
-        for image_controller in self.queue:
+        for image_controller in list(self.queue):
             if image_controller.is_unloading_time():
                 image_controller.unload()
                 self.queue.remove(image_controller)
@@ -317,7 +317,7 @@ class Controller(dict[ImageControllerTag, ImageController]):
             return
         self._last_time_unload_check = time.time()
 
-        for image_controller in self.unload_queue:
+        for image_controller in list(self.unload_queue):
             if image_controller.is_unloading_time():
                 if max_count is not None:
                     max_count -= 1
