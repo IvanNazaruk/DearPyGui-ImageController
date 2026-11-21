@@ -150,7 +150,6 @@ class ImageUnloaderWorker(Worker):
     def __init__(self, unload_queue: list[ImageController], controller: ControllerType):
         self.queue = unload_queue
         self.controller = controller
-        self.start_thread()
 
     def loop(self):
         for image_controller in list(self.queue):
@@ -164,7 +163,6 @@ class ImageLoaderWorker(Worker):
 
     def __init__(self, loading_queue: queue.LifoQueue[ImageController]):
         self.queue = loading_queue
-        self.start_thread()
 
     @staticmethod
     def load(image_controller: ImageController):
@@ -216,15 +214,23 @@ class Controller(dict[ImageControllerTag, ImageController]):
     @disable_work_in_threads.setter
     def disable_work_in_threads(self, value: bool):
         self._disable_work_in_threads = value
-        for worker in self.loading_workers:
-            if value:
-                worker.stop()
-            else:
-                worker.start_thread()
         if value:
-            self.unloading_worker.stop()
-        else:
-            self.unloading_worker.start_thread()
+            for worker in self._workers():
+                worker.stop()
+        elif self._threads_started:
+            for worker in self._workers():
+                worker.start_thread()
+
+    def _workers(self) -> list[Worker]:
+        return [*self.loading_workers, self.unloading_worker]
+
+    def _start_threads_once(self):
+        """Threads start with the first image, not on import"""
+        if self._threads_started or self._disable_work_in_threads:
+            return
+        self._threads_started = True
+        for worker in self._workers():
+            worker.start_thread()
 
     def __init__(self,
                  max_inactive_time: int = 10,
@@ -253,13 +259,15 @@ class Controller(dict[ImageControllerTag, ImageController]):
         ]
         self.unload_queue = []
         self.unloading_worker = ImageUnloaderWorker(self.unload_queue, self)
-        self.disable_work_in_threads = disable_work_in_threads
+        self._threads_started = False
+        self._disable_work_in_threads = disable_work_in_threads
 
     def add(self, image: str | bytes | Path | SupportsRead[bytes] | Image) -> tuple[ImageControllerTag, ImageController]:
         """
         :param image: Pillow Image or the path to the image, or any other object that Pillow can open
         :return:
         """
+        self._start_threads_once()
 
         if not isinstance(image, Image):
             image = img.open(image)
