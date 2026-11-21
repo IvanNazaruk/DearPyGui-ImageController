@@ -122,6 +122,13 @@ while dpg.is_dearpygui_running():
 ```
 Full example: [example2.py](example2.py).
 
+## Closing the app
+Nothing special: call `dpg.destroy_context()` as usual.
+
+The library loads, unloads and animates images in background threads, and any DPG call after the context is destroyed crashes the whole process (segfault). So on import the library decorates `dpg.destroy_context`: before destroying the context it waits until these threads finish their current DPG call (up to about a second while a big animation is loading) and stops them from calling DPG. A new context works again after `dpg_img.set_texture_registry(...)`, as usual.
+
+This works when you call it as `dpg.destroy_context()`. If you imported the function itself before the library (`from dearpygui.dearpygui import destroy_context`), that name points to the undecorated function.
+
 ## Development
 ```shell
 pip install -r requirements-dev.txt

@@ -275,7 +275,9 @@ class ImageUnloaderWorker(Worker):
     def loop(self):
         for image_controller in list(self.queue):
             if image_controller.is_unloading_time():
-                image_controller.unload()
+                with tools.dpg_access() as alive:
+                    if alive:
+                        image_controller.unload()
                 self.queue.remove(image_controller)
         time.sleep(self.controller.unloading_check_sleep_time)
 
@@ -285,7 +287,9 @@ class AnimationWorker(Worker):
         self.controller = controller
 
     def loop(self):
-        self.controller.animate()
+        with tools.dpg_access() as alive:
+            if alive:
+                self.controller.animate()
         time.sleep(0.01)
 
 
@@ -331,7 +335,11 @@ class ImageLoaderWorker(Worker):
         if self.STOP:
             self.queue.put(image_controller)
             return
-        self.load(image_controller)
+        with tools.dpg_access() as alive:
+            if alive:
+                self.load(image_controller)
+            else:
+                image_controller.loading = False
         self.queue.task_done()
 
 

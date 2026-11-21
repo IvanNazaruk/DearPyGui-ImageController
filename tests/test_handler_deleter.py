@@ -18,6 +18,7 @@ def test_deletes_after_delay_frames_in_render_loop():
     script = textwrap.dedent('''
         import time
         import dearpygui.dearpygui as dpg
+        import DearPyGui_ImageController as dpg_img
         from DearPyGui_ImageController.tools import HandlerDeleter
         dpg.create_context()
         dpg.create_viewport(); dpg.setup_dearpygui(); dpg.show_viewport()

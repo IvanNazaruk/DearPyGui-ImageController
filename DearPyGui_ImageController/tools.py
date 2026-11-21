@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import atexit
 import contextlib
+import functools
 import dearpygui.dearpygui as dpg
 import threading
 import time
@@ -37,13 +38,65 @@ def _mark_interpreter_exiting():
     interpreter_exiting = True
 
 
+# Background threads call DPG only inside `with dpg_access() as alive:`.
+# dpg.destroy_context(), decorated below, waits until they leave it, and after it `alive` is False,
+# because any DPG call without a context crashes the process. set_texture_registry() (called for every new context) makes it True again.
+_dpg_access_condition = threading.Condition()
+_dpg_users = 0
+_dpg_alive = True
+
+
+def dpg_is_alive() -> bool:
+    return _dpg_alive and not interpreter_exiting
+
+
+@contextlib.contextmanager
+def dpg_access() -> Iterator[bool]:
+    global _dpg_users
+    with _dpg_access_condition:
+        alive = dpg_is_alive()
+        if alive:
+            _dpg_users += 1
+    try:
+        yield alive
+    finally:
+        if alive:
+            with _dpg_access_condition:
+                _dpg_users -= 1
+                _dpg_access_condition.notify_all()
+
+
+def wait_for_background_threads(destroy_context):
+    """
+    Decorator for dpg.destroy_context (applied on import): before the context is destroyed,
+    waits until the library's background threads finish their current DPG call and stops them from calling DPG.
+    """
+    if getattr(destroy_context, '_waits_for_background_threads', False):  # Already decorated
+        return destroy_context
+
+    @functools.wraps(destroy_context)
+    def wrapper(*args, **kwargs):
+        global _dpg_alive
+        with _dpg_access_condition:
+            _dpg_alive = False
+            _dpg_access_condition.wait_for(lambda: _dpg_users == 0)
+        return destroy_context(*args, **kwargs)
+
+    wrapper._waits_for_background_threads = True
+    return wrapper
+
+
+dpg.destroy_context = wait_for_background_threads(dpg.destroy_context)
+
+
 texture_registry: int | str = 0
 texture_plug: TextureTag = None  # noqa
 
 
 def set_texture_registry(texture_registry_tag: int | str):
-    global texture_registry
+    global texture_registry, _dpg_alive
     texture_registry = texture_registry_tag
+    _dpg_alive = True
 
 
 def get_texture_plug() -> TextureTag:
@@ -186,20 +239,23 @@ class HandlerDeleter:
 
     @classmethod
     def _worker(cls):
-        # shortcut: the thread calls DPG until its queue is empty (about delay_frames frames); destroying the DPG context during that time can crash
         while True:
             time.sleep(0.05)
-            if interpreter_exiting:
-                return
-            running = dpg.is_dearpygui_running()
-            frame = dpg.get_frame_count()
-            with cls._lock:
-                due = [handler for delete_at, handler in cls._queue if not running or delete_at <= frame]
-                cls._queue = [item for item in cls._queue if item[1] not in due]
-                if not cls._queue:
-                    cls._thread_running = False
-            for handler in due:
-                with contextlib.suppress(Exception):
-                    dpg.delete_item(handler)
+            with dpg_access() as alive:
+                if not alive:  # The context and its handlers are gone
+                    with cls._lock:
+                        cls._queue = []
+                        cls._thread_running = False
+                    return
+                running = dpg.is_dearpygui_running()
+                frame = dpg.get_frame_count()
+                with cls._lock:
+                    due = [handler for delete_at, handler in cls._queue if not running or delete_at <= frame]
+                    cls._queue = [item for item in cls._queue if item[1] not in due]
+                    if not cls._queue:
+                        cls._thread_running = False
+                for handler in due:
+                    with contextlib.suppress(Exception):
+                        dpg.delete_item(handler)
             if not cls._thread_running:
                 return
