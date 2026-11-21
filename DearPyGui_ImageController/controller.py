@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import queue
 import threading
 import time
@@ -264,12 +265,10 @@ class Controller(dict[ImageControllerTag, ImageController]):
             image = img.open(image)
         image: Image
 
-        # Image hash calculation: https://web.archive.org/web/20171112054354/https://www.safaribooksonline.com/blog/2013/11/26/image-hashing-with-python/
-        hash_image = image.resize((12, 12), LANCZOS).convert('L')
-        pixels = list(hash_image.getdata())
-        avg = sum(pixels) / len(pixels)
-        bits = "".join(map(lambda pixel: '1' if pixel < avg else '0', pixels))
-        image_tag = int(bits, 2).__format__('016x').upper()
+        image_hash = hashlib.blake2b(digest_size=16)
+        image_hash.update(f'{image.mode} {image.size}'.encode())
+        image_hash.update(image.tobytes())
+        image_tag = image_hash.hexdigest()
 
         # Checking if an image has already been added
         if image_info := self.get(image_tag):
