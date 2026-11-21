@@ -4,6 +4,7 @@ import atexit
 import contextlib
 import dearpygui.dearpygui as dpg
 import threading
+import time
 from typing import Iterator
 from PIL.Image import BOX, Image, LANCZOS
 from typing import Iterable, TypeVar
@@ -157,12 +158,14 @@ def image_to_dpg_texture(image: Image, size: tuple[int, int] = None) -> TextureT
 
 class HandlerDeleter:
     """
-    Prevents the DPG from shutting down suddenly.
-    Removes the Handler after a period of time.
+    Deletes DPG item handler registries a few frames later.
+    Deleting one right away, while DPG may still be running its handlers in the current frame, can crash DPG.
     """
-    deletion_queue = []
+    delay_frames = 70
 
-    __thread: bool = False
+    _queue: list[tuple[int, int | str]] = []  # (frame to delete at, handler)
+    _lock = threading.Lock()
+    _thread_running = False
 
     @classmethod
     def add(cls, handler: int | str):
@@ -170,28 +173,33 @@ class HandlerDeleter:
         Adds a handler to the deletion queue
         :param handler: DPG handler
         """
-        if not cls.__thread:
-            cls.__thread = True
-            threading.Thread(target=cls._worker, daemon=True).start()
-        cls.deletion_queue.append(handler)
+        if not dpg.is_dearpygui_running():  # No frames are rendered, so nothing can be using it
+            with contextlib.suppress(Exception):
+                dpg.delete_item(handler)
+            return
+        with cls._lock:
+            cls._queue.append((dpg.get_frame_count() + cls.delay_frames, handler))
+            if cls._thread_running:
+                return
+            cls._thread_running = True
+        threading.Thread(target=cls._worker, daemon=True).start()
 
     @classmethod
     def _worker(cls):
+        # shortcut: the thread calls DPG until its queue is empty (about delay_frames frames); destroying the DPG context during that time can crash
         while True:
-            for _ in range(2):
-                dpg.split_frame()
-
-            if len(cls.deletion_queue) == 0:
-                break
-
-            deletion_queue = cls.deletion_queue.copy()
-            cls.deletion_queue.clear()
-
-            for _ in range(70):
-                dpg.split_frame()
-
-            for handler in deletion_queue:
+            time.sleep(0.05)
+            if interpreter_exiting:
+                return
+            running = dpg.is_dearpygui_running()
+            frame = dpg.get_frame_count()
+            with cls._lock:
+                due = [handler for delete_at, handler in cls._queue if not running or delete_at <= frame]
+                cls._queue = [item for item in cls._queue if item[1] not in due]
+                if not cls._queue:
+                    cls._thread_running = False
+            for handler in due:
                 with contextlib.suppress(Exception):
                     dpg.delete_item(handler)
-            del deletion_queue
-        cls.__thread = False
+            if not cls._thread_running:
+                return
