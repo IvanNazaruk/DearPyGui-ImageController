@@ -3,14 +3,26 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "DearPyGui_ImageController"
-version = "1.0.1"
-description = "Loads DearPyGui images only while they are visible"
+name = "DearPyGui-ImageController"
+version = "1.1.0"
+description = "Shows a lot of images in Dear PyGui without running out of memory"
 readme = "README.md"
 license = "MIT"
 authors = [{ name = "IvanNazaruk" }]
 requires-python = ">=3.9"
 dependencies = ["dearpygui", "pillow"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Topic :: Multimedia :: Graphics",
+]
+
+[project.optional-dependencies]
+numpy = ["numpy"]  # About 8 times faster image loading
+
+[project.urls]
+Homepage = "https://github.com/IvanNazaruk/DearPyGui-ImageController"
+Issues = "https://github.com/IvanNazaruk/DearPyGui-ImageController/issues"
 
 [tool.setuptools]
 packages = ["DearPyGui_ImageController"]

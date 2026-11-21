@@ -1,5 +1,5 @@
 ## DearPyGui-ImageController
-Shows a lot of images in [Dear PyGui](https://github.com/hoffstadt/DearPyGui) without running out of video memory.
+Shows a lot of images in [Dear PyGui](https://github.com/hoffstadt/DearPyGui) without running out of memory.
 
 An image is loaded into DPG only while it is visible. If it stays out of sight for a while, its texture is unloaded and loaded again when it comes back into view.
 
@@ -22,12 +22,11 @@ You can try this example with [example.py](example.py) (put images into a `test_
 ## Installation
 Python 3.9 or newer.
 ```shell
-pip install git+https://github.com/IvanNazaruk/DearPyGui-ImageController
+pip install "DearPyGui-ImageController[numpy]"
 ```
-Also install numpy: without it, images load about 8 times slower.
-```shell
-pip install numpy
-```
+`[numpy]` also installs numpy: without it, images load about 8 times slower. Without numpy: `pip install DearPyGui-ImageController`.
+
+The latest development version: `pip install git+https://github.com/IvanNazaruk/DearPyGui-ImageController`
 
 ## Quick start
 ```python
