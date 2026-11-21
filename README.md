@@ -1,41 +1,35 @@
 ## DearPyGui-ImageController
-Optimizes RAM consumption by unloading images from the DPG.
+Shows a lot of images in [Dear PyGui](https://github.com/hoffstadt/DearPyGui) without running out of video memory.
 
-It works quite simply: if the image is visible it is loaded, if not visible then after a certain amount of time is unloaded from the DPG
+An image is loaded into DPG only while it is visible. If it stays out of sight for a while, its texture is unloaded and loaded again when it comes back into view.
+
+**Features**
+- Loads visible images in background threads and unloads hidden ones
+- Textures are created at the size the image is shown, not at the full image size
+- Optional memory limit per image
+- Animated GIF, APNG and WebP
+- Blurred preview while an image is loading
+- The same image added several times is loaded once
+
 ## Demo video
 
 https://user-images.githubusercontent.com/46572469/208324280-9e2e02a1-0479-433c-82ac-9fd1fdf7f13c.mp4
 
-*1255 images with 1920×1080 resolution were used*
+*1255 images with 1920×1080 resolution were used. The video shows an older version: without the blurred preview, view-sized textures and animations.*
 
-#### You can try this example using this script: [example.py](example.py)
+You can try this example with [example.py](example.py) (put images into a `test_images` folder next to it).
 
-
-## How to use it?
-0) install the library
+## Installation
+Python 3.9 or newer.
 ```shell
 pip install git+https://github.com/IvanNazaruk/DearPyGui-ImageController
 ```
-1) Import the library:
-```python
-import DearPyGui_ImageController as dpg_img
-```
-2) Set DPG texture registry:
-```python
-dpg_img.set_texture_registry(dpg.add_texture_registry())
-```
-3) Add the image:
-```python
-dpg_img.add_image("{IMAGE_PATH}")
-```
-Or use Pillow:
-```python
-from PIL import Image
-img = Image.open("{IMAGE_PATH}")
-dpg_img.add_image(img)
+Also install numpy: without it, images load about 8 times slower.
+```shell
+pip install numpy
 ```
 
-### Full example:
+## Quick start
 ```python
 import dearpygui.dearpygui as dpg
 
@@ -47,9 +41,9 @@ dpg_img.set_texture_registry(dpg.add_texture_registry())
 with dpg.window():
     dpg_img.add_image("{IMAGE_PATH}")
 
+    # Or a Pillow image:
     # from PIL import Image
-    # img = Image.open("{IMAGE_PATH}")
-    # dpg_img.add_image(img)
+    # dpg_img.add_image(Image.open("{IMAGE_PATH}"))
 
 dpg.create_viewport()
 dpg.setup_dearpygui()
@@ -57,20 +51,28 @@ dpg.show_viewport()
 dpg.start_dearpygui()
 dpg.destroy_context()
 ```
+`add_image` accepts a path, bytes, a file object or a Pillow `Image`, and returns an `ImageViewer`.
 
-## Additional Information
- - ### How to resize an image after it has been created?
- 
- Use the internal functions `set_width`, `set_height` and `set_size`. If width or height is not specified, the other dimension will be decreased/increased proportionally. If the dimensions are not set, the image size will be used.
- 
- An example use case is found in [example.py](example.py):<br/>
- First we will save the created image viewer object:
- https://github.com/IvanNazaruk/DearPyGui-ImageController/blob/5866e1ddbd84a4cd5252a092627841df2d42a32c/example.py#L21-L22
- And after that they are resized:
- https://github.com/IvanNazaruk/DearPyGui-ImageController/blob/5866e1ddbd84a4cd5252a092627841df2d42a32c/example.py#L33-L34
+## Image viewer
+`add_image(image, width=None, height=None, parent=0, controller=None, show_loading_indicator=False)` creates an `ImageViewer`. You can also create one yourself and change its image later:
+```python
+viewer = dpg_img.ImageViewer()
+viewer.create(parent=window)       # adds it to DPG
+viewer.load("{IMAGE_PATH}")        # shows another image
+viewer.unload()                    # shows nothing
+viewer.delete()                    # removes it from DPG
+```
 
- - ### How do I bind the DPG handler to the image?
- Use the internal function `set_image_handler`. Example usage:
+### Size
+Use `set_width`, `set_height` and `set_size`. If only one dimension is set, the other one follows the image proportions. If neither is set, the image size is used.
+```python
+viewer = dpg_img.add_image("{IMAGE_PATH}", height=100)
+viewer.set_size(width=50, height=50)
+```
+The texture is created at the size the image is shown, so a 1920×1080 picture shown 120 px wide takes a 120×67 texture. When the viewer grows past its texture, the texture is rebuilt 1.5× bigger (never bigger than the image), so resizing step by step doesn't rebuild it every time. A viewer without a set size gets the full-size texture.
+
+### Click and other handlers
+Use `set_image_handler`; it works even while the image is not loaded:
 ```python
 with dpg.item_handler_registry() as image_handler:
     dpg.add_item_clicked_handler(callback=lambda _, data: print(f"Clicked: {data[0]}"))
@@ -78,25 +80,45 @@ with dpg.item_handler_registry() as image_handler:
 image_viewer = dpg_img.add_image("{IMAGE_PATH}")
 image_viewer.set_image_handler(image_handler)
 ```
- 
- - ### Textures are only as big as the view
- If a viewer has a width or height set and it is smaller than the image, the DPG texture is created at the view size, not the full image size. This saves video memory and loading time. If the viewer later grows past the texture, the texture is rebuilt 1.5x bigger (never bigger than the image), so resizing step by step doesn't rebuild it every time. A viewer without a set size still gets the full-size texture.
 
- - ### Animations (GIF, APNG, animated WebP)
- Animated images play automatically while they are visible and stop when they are not. Every frame is a separate texture, so an animation takes `frames` times more memory than a still image; use `max_texture_bytes` (below) to cap it.
- If you set `disable_work_in_threads = True`, call `dpg_img.default_controller.animate()` every frame next to `load_images()` and `unload_images()` (see [example2.py](example2.py)).
+### Blurred preview while loading
+Until the real texture is loaded, the viewer shows a tiny 16 px wide copy of the image stretched to the viewer size. It costs about 4 KB of texture memory per image. To also show a loading indicator over it, pass `show_loading_indicator=True` to `add_image` or `ImageViewer`.
 
- - ### Blurred preview while loading
- Until the real texture is loaded, the viewer shows a tiny 16 px wide copy of the image stretched to the viewer size. It costs about 4 KB of texture memory per image. Change the width with `dpg_img.default_controller.preview_size = 8`, or set `0` to turn the preview off. To also show a loading indicator over the preview, use `dpg_img.add_image(path, show_loading_indicator=True)` (or `ImageViewer(show_loading_indicator=True)`).
+## Animations
+GIF, APNG and animated WebP play automatically while they are visible and pause when they are not. Frames follow the durations stored in the file, by time, not by rendered frames. Every frame is a separate texture, so an animation takes as many times more memory as it has frames; `max_texture_bytes` (below) caps it.
 
- - ### How to limit the memory of one image?
- DPG stores every texture pixel as 4 floats (16 bytes), so a 1920x1080 picture takes about 33 MB. Set a limit per image (all frames of an animation together) and bigger images are loaded at a lower resolution, keeping proportions:
+## Controller settings
+All viewers use `dpg_img.default_controller` unless you pass your own `dpg_img.Controller(...)` with `controller=`. Settings:
+
+| Setting | Default | What it does |
+|---|---|---|
+| `max_inactive_time` | `10` | Seconds an image can stay out of sight before it is unloaded |
+| `unloading_check_sleep_time` | `2.5` | How often (seconds) hidden images are checked for unloading |
+| `number_image_loader_workers` | `2` | Images loaded at the same time (constructor only) |
+| `max_texture_bytes` | `None` | Texture memory limit for one image, all frames together; bigger images load at a lower resolution |
+| `preview_size` | `16` | Width of the blurred preview in pixels; `0` turns it off |
+| `disable_work_in_threads` | `False` | Load, unload and animate in your own loop instead of threads |
+
+DPG stores every texture pixel as 4 floats (16 bytes), so a 1920×1080 picture takes about 33 MB:
 ```python
 dpg_img.default_controller.max_texture_bytes = 16 * 1024 * 1024  # 16 MB per image
 ```
- The default is `None`: no limit.
 
- ## TODO list
- - [ ] Increase documentation
- - [x] GIFs support (also APNG and animated WebP)
- 
+### Without threads
+With `disable_work_in_threads = True` no threads are started, and your render loop does the work:
+```python
+dpg_img.default_controller.disable_work_in_threads = True
+...
+while dpg.is_dearpygui_running():
+    dpg_img.default_controller.load_images(max_count=1)
+    dpg_img.default_controller.unload_images(max_count=1)
+    dpg_img.default_controller.animate()
+    dpg.render_dearpygui_frame()
+```
+Full example: [example2.py](example2.py).
+
+## Development
+```shell
+pip install -r requirements-dev.txt
+python -m pytest
+```
