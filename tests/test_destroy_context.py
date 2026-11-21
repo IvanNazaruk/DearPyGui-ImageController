@@ -5,6 +5,8 @@ import textwrap
 import pytest
 from PIL import Image
 
+pytestmark = pytest.mark.display
+
 SETUP = '''
 import time
 import dearpygui.dearpygui as dpg
@@ -70,6 +72,7 @@ def test_unloader_after_destroy_context():
 
 def test_new_context_after_destroy_works():
     output = run_script('''
+        run(0.2)  # DPG itself crashes on Linux if a shown viewport never rendered a frame before a new context shows a texture
         dpg.destroy_context()
         dpg.create_context()
         dpg_img.tools.texture_plug = None

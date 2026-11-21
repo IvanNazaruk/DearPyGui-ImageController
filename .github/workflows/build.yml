@@ -22,7 +22,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
 
-      - run: python -m pytest
+      # Some tests open a window: a virtual X display with software OpenGL
+      - run: sudo apt-get install -y xvfb libgl1-mesa-dri
+      - run: xvfb-run -a python -m pytest
 
       - run: pip wheel . --no-deps -w dist
 

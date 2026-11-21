@@ -3,6 +3,7 @@ import sys
 import textwrap
 
 import dearpygui.dearpygui as dpg
+import pytest
 
 from DearPyGui_ImageController.tools import HandlerDeleter
 
@@ -13,6 +14,7 @@ def test_deletes_right_away_without_render_loop(controller):
     assert not dpg.does_item_exist(handler)
 
 
+@pytest.mark.display
 def test_deletes_after_delay_frames_in_render_loop():
     """In a fresh interpreter: the render loop needs a viewport."""
     script = textwrap.dedent('''

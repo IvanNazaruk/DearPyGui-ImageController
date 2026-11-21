@@ -2,6 +2,8 @@ import subprocess
 import sys
 import textwrap
 
+import pytest
+
 
 def count_threads(code):
     """Runs code in a fresh interpreter (this one has already imported the library) and returns its output."""
@@ -26,6 +28,7 @@ def test_first_image_starts_threads():
     assert count_threads("dpg_img.default_controller.add(Image.new('RGB', (4, 4)))") == 3
 
 
+@pytest.mark.display
 def test_animated_image_starts_animation_thread(tmp_path):
     path = (tmp_path / 'a.gif').as_posix()
     Image_ = __import__('PIL.Image', fromlist=['Image'])
@@ -64,6 +67,7 @@ def test_threads_restart_after_disable_and_enable():
     ''') == 3
 
 
+@pytest.mark.display
 def test_failed_load_does_not_stop_the_loader():
     script = textwrap.dedent('''
         import time

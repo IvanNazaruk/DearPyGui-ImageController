@@ -1,9 +1,19 @@
 import gc
+import os
+import sys
 
 import dearpygui.dearpygui as dpg
 import pytest
 
 import DearPyGui_ImageController as dpg_img
+
+
+def pytest_collection_modifyitems(items):
+    if sys.platform.startswith('linux') and not os.environ.get('DISPLAY'):
+        skip = pytest.mark.skip(reason='needs a display: run with xvfb-run')
+        for item in items:
+            if 'display' in item.keywords:
+                item.add_marker(skip)
 
 
 @pytest.fixture
