@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import atexit
 import contextlib
 import dearpygui.dearpygui as dpg
 import threading
@@ -24,6 +25,16 @@ except ModuleNotFoundError:
 
     def _image_to_1d_array(image: Image) -> list:  # image is always RGBA here
         return [value / 255 for value in image.tobytes()]
+
+# Objects deleted during interpreter shutdown must not call DPG: its context is usually destroyed by then
+interpreter_exiting = False
+
+
+@atexit.register
+def _mark_interpreter_exiting():
+    global interpreter_exiting
+    interpreter_exiting = True
+
 
 texture_registry: int | str = 0
 texture_plug: TextureTag = None  # noqa

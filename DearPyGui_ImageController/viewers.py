@@ -87,6 +87,8 @@ class ImageViewerCreator(ABC):
         self.show(texture_tag)
 
     def __del__(self):
+        if tools.interpreter_exiting:
+            return
         if self.__image_info:
             self.__image_info.unsubscribe(self.__subscription_tag)
         self.image = None
@@ -329,6 +331,8 @@ class ImageViewer(ImageViewerCreator):
         self.__del__()
 
     def __del__(self):
+        if tools.interpreter_exiting:
+            return
         if self.group:
             with contextlib.suppress(Exception):  # If it was deleted with DPG
                 dpg.delete_item(self.group)
