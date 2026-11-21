@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,7 +7,7 @@ name = "DearPyGui_ImageController"
 version = "1.0.1"
 description = "Loads DearPyGui images only while they are visible"
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
 authors = [{ name = "IvanNazaruk" }]
 requires-python = ">=3.9"
 dependencies = ["dearpygui", "pillow"]
@@ -18,3 +18,4 @@ packages = ["DearPyGui_ImageController"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = ["display: opens a window; skipped on Linux without a display (run with xvfb-run)"]
