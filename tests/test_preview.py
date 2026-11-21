@@ -44,8 +44,20 @@ def test_preview_is_shown_until_loaded_and_after_unload(controller):
     assert dpg.does_item_exist(image_info.preview_texture)
 
 
-def test_loading_indicator_is_centered_over_the_preview(controller):
+def test_loading_indicator_is_hidden_by_default(controller):
     viewer, _ = create_viewer(controller, width=200)
+    assert viewer._loading_indicator is None
+    assert dpg.get_item_children(viewer._view_window, 1) == [viewer.dpg_image]
+
+
+def test_show_loading_argument_still_shows_indicator(controller):
+    viewer, image_info = create_viewer(controller, width=200)
+    viewer.load(Image.new('RGB', (1000, 500), 'blue'), show_loading=True)
+    assert viewer._loading_indicator is not None
+
+
+def test_loading_indicator_is_centered_over_the_preview(controller):
+    viewer, _ = create_viewer(controller, width=200, show_loading_indicator=True)
     x, y = dpg.get_item_pos(viewer._loading_indicator)
     radius = dpg.get_item_configuration(viewer._loading_indicator)['radius']
     assert (x + radius * 13 / 2, y + radius * 13 / 2) == pytest.approx((100, 50), abs=1)  # DPG stores pos as whole pixels

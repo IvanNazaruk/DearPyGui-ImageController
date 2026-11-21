@@ -62,6 +62,8 @@ class ImageViewerCreator(ABC):
             self.show(self.__image_info.texture_tag)
         else:
             self.hide()
+            if show_loading and not getattr(self, '_loading_indicator', None):
+                self.create_loading_indicator()
 
     def get_preview_texture(self) -> TextureTag | None:
         return self.__image_info.preview_texture if self.__image_info else None
@@ -110,6 +112,7 @@ class ImageViewer(ImageViewerCreator):
     _view_window: int = None
 
     dpg_image: int | None = None
+    show_loading_indicator: bool = False
     _loading_indicator: int | None = None
     _visible_handler: int = None
     image_handler: int | str | None = None
@@ -199,7 +202,8 @@ class ImageViewer(ImageViewerCreator):
                  image: str | bytes | Path | SupportsRead[bytes] | Image = None,
                  controller: ControllerType = None,
                  unload_width: int = 100,
-                 unload_height: int = 100):
+                 unload_height: int = 100,
+                 show_loading_indicator: bool = False):
         """
         Image viewer, which automatically unloads the image
         from the DPG if the user can't see it.
@@ -209,11 +213,13 @@ class ImageViewer(ImageViewerCreator):
         :param controller: Set `None` if you want to use the default controller
         :param unload_width: Viewer width, when the image is not yet loaded (or unloaded) from the viewer
         :param unload_height: Viewer height, when the image is not yet loaded (or unloaded) from the viewer
+        :param show_loading_indicator: Show a loading indicator over the preview while the image is not loaded
         """
         self.texture_tag = tools.get_texture_plug()
 
         self.unload_width = unload_width
         self.unload_height = unload_height
+        self.show_loading_indicator = show_loading_indicator
         if controller:
             self.set_controller(controller)
         if image:
@@ -319,6 +325,7 @@ class ImageViewer(ImageViewerCreator):
         self.dpg_image = None
 
         dpg.delete_item(self._view_window, children_only=True)
+        self._loading_indicator = None
         if self.image:
             width, height = self.get_size()
             dpg.configure_item(self._view_window, width=width, height=height)
@@ -330,7 +337,8 @@ class ImageViewer(ImageViewerCreator):
 
             if self.image_handler:
                 dpg.bind_item_handler_registry(self.dpg_image, self.image_handler)
-            self.create_loading_indicator()  # Drawn over the preview
+            if self.show_loading_indicator:
+                self.create_loading_indicator()  # Drawn over the preview
         return self
 
     def delete(self):

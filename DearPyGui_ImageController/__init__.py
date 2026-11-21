@@ -19,8 +19,9 @@ def add_image(image: bytes | Path | SupportsRead[bytes] | Image,
               width: int = None,
               height: int = None,
               parent: int | str = 0,
-              controller: Controller = None) -> ImageViewer:
-    image_viewer = ImageViewer()
+              controller: Controller = None,
+              show_loading_indicator: bool = False) -> ImageViewer:
+    image_viewer = ImageViewer(show_loading_indicator=show_loading_indicator)
     image_viewer.set_controller(controller)
     image_viewer.load(image)
     image_viewer.set_size(width=width, height=height)
