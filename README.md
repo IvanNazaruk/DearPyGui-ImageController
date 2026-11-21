@@ -79,6 +79,9 @@ image_viewer = dpg_img.add_image("{IMAGE_PATH}")
 image_viewer.set_image_handler(image_handler)
 ```
  
+ - ### Textures are only as big as the view
+ If a viewer has a width or height set and it is smaller than the image, the DPG texture is created at the view size, not the full image size. This saves video memory and loading time. If the viewer later grows past the texture, the texture is rebuilt 1.5x bigger (never bigger than the image), so resizing step by step doesn't rebuild it every time. A viewer without a set size still gets the full-size texture.
+
  ## TODO list
  - [ ] Increase documentation
  - [ ] GIFs support

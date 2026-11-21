@@ -3,8 +3,8 @@ from __future__ import annotations
 import contextlib
 import dearpygui.dearpygui as dpg
 import threading
-from PIL.Image import Image
-from typing import TypeVar
+from PIL.Image import Image, LANCZOS
+from typing import Iterable, TypeVar
 
 TextureTag = TypeVar('TextureTag', bound=int)
 
@@ -52,8 +52,26 @@ def get_texture_plug() -> TextureTag:
     return texture_plug
 
 
-def image_to_dpg_texture(image: Image) -> TextureTag:
+def get_texture_size(image_size: tuple[int, int], view_sizes: Iterable[tuple[int, int]], scale: float = 1) -> tuple[int, int]:
+    """
+    The smallest texture that covers every view size (times scale), but never bigger than the image itself.
+    No view sizes means the full image size.
+    """
+    image_width, image_height = image_size
+    view_sizes = list(view_sizes)
+    if not view_sizes:
+        return image_width, image_height
+    width = max(view_width for view_width, _ in view_sizes) * scale
+    height = max(view_height for _, view_height in view_sizes) * scale
+    return max(1, min(int(width), image_width)), max(1, min(int(height), image_height))
+
+
+def image_to_dpg_texture(image: Image, size: tuple[int, int] = None) -> TextureTag:
     rgba_image = image.convert("RGBA")
+    if size and size != rgba_image.size:
+        resized_image = rgba_image.resize(size, LANCZOS)
+        rgba_image.close()
+        rgba_image = resized_image
     img_1d_array = _image_to_1d_array(rgba_image)
     dpg_texture_tag = dpg.add_static_texture(width=rgba_image.width,
                                              height=rgba_image.height,

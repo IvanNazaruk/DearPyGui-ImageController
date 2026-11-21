@@ -38,10 +38,15 @@ class ImageController:
     # If loaded is False, the texture plug will be used.
     texture_tag: TextureTag
 
+    texture_size: tuple[int, int] | None = None
+
     last_time_visible: time.time = 0
 
     loading: bool = False
     loaded: bool = False
+
+    # When a view grows past the texture, the new texture is this much bigger, so resizing step by step doesn't rebuild it every time
+    grow_headroom = 1.5
 
     def __init__(self, image: Image, tag_in_controller: ImageControllerTag, controller: ControllerType):
         self.image = image
@@ -64,6 +69,22 @@ class ImageController:
             self.controller = None
             self.unload()
 
+    def get_needed_texture_size(self, scale: float = 1) -> tuple[int, int]:
+        view_sizes = []
+        for image_viewer in list(self.subscribers.values()):
+            get_size = getattr(image_viewer, 'get_size', None)
+            if get_size is None:  # A viewer without a size needs the full image
+                return self.image.size
+            view_sizes.append(get_size())
+        return tools.get_texture_size(self.image.size, view_sizes, scale)
+
+    def needs_bigger_texture(self) -> bool:
+        if not self.loaded or self.image is None or self.texture_size is None:
+            return False
+        needed_width, needed_height = self.get_needed_texture_size()
+        texture_width, texture_height = self.texture_size
+        return needed_width > texture_width or needed_height > texture_height
+
     def is_unloading_time(self) -> bool:
         if self.image:
             return (time.time() - self.last_time_visible) > self.controller.max_inactive_time
@@ -76,7 +97,9 @@ class ImageController:
         it will be loaded back in, using the loader worker
         """
         self.last_time_visible = time.time()
-        if self.loaded or self.image is None:
+        if self.image is None:
+            return
+        if self.loaded and not self.needs_bigger_texture():
             return
         if not self.loading:
             with contextlib.suppress(queue.Full):
@@ -90,24 +113,32 @@ class ImageController:
             except Exception:
                 traceback.print_exc()
 
-    def load(self, texture_tag: TextureTag):
-        self.texture_tag = texture_tag
-        self.loaded = True
-        self.loading = False
-        if len(self.subscribers) == 0:
-            self.unload()
-            return
-        for image_viewer in self.subscribers.values():
-            try:
-                image_viewer.show(self.texture_tag)  # noqa
-            except Exception:
-                traceback.print_exc()
-        if self.image:
+    def load(self, texture_tag: TextureTag, texture_size: tuple[int, int] = None):
+        old_texture_tag = self.texture_tag
+        with dpg.mutex():
+            self.texture_tag = texture_tag
+            self.texture_size = texture_size
+            self.loaded = True
+            self.loading = False
+            if len(self.subscribers) == 0:
+                self.unload()
+            else:
+                for image_viewer in list(self.subscribers.values()):
+                    try:
+                        image_viewer.show(self.texture_tag)  # noqa
+                    except Exception:
+                        traceback.print_exc()
+            # Delete the previous (smaller) texture only after the viewers have switched to the new one
+            if old_texture_tag not in (tools.get_texture_plug(), texture_tag):
+                with contextlib.suppress(Exception):
+                    dpg.delete_item(old_texture_tag)
+        if self.image and self not in self.controller.unload_queue:
             self.controller.unload_queue.append(self)
 
     def unload(self):
         old_texture_tag = self.texture_tag
         self.texture_tag = tools.get_texture_plug()
+        self.texture_size = None
         self.loaded = False
         self.loading = False
         for image_viewer in self.subscribers.values():
@@ -168,15 +199,16 @@ class ImageLoaderWorker(Worker):
     def load(image_controller: ImageController):
         if not image_controller.loading:
             return
-        if image_controller.is_unloading_time() or image_controller.loaded:
+        growing = image_controller.loaded
+        if image_controller.is_unloading_time() or (growing and not image_controller.needs_bigger_texture()):
             image_controller.loading = False
             return
 
-        image_controller.now_loading()
+        if not growing:
+            image_controller.now_loading()
         try:
-            image_controller.load(
-                tools.image_to_dpg_texture(image_controller.image)
-            )
+            size = image_controller.get_needed_texture_size(image_controller.grow_headroom if growing else 1)
+            image_controller.load(tools.image_to_dpg_texture(image_controller.image, size), size)
         except Exception:  # TODO: ValueError: Operation on closed image
             traceback.print_exc()
 

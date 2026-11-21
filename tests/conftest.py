@@ -1,3 +1,5 @@
+import gc
+
 import dearpygui.dearpygui as dpg
 import pytest
 
@@ -10,6 +12,12 @@ def controller():
     dpg.create_context()
     dpg_img.set_texture_registry(dpg.add_texture_registry())
     dpg_img.tools.texture_plug = None
+    dpg_img.ImageViewer._get_theme.__func__.cache_clear()  # the cached theme belongs to the previous context
     controller = dpg_img.Controller(disable_work_in_threads=True)
     yield controller
+    # Viewers call DPG in __del__, so delete them while the context still exists
+    for image_info in list(controller.values()):
+        for viewer in list(image_info.subscribers.values()):
+            viewer.delete()
+    gc.collect()
     dpg.destroy_context()
