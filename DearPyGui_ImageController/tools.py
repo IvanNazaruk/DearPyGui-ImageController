@@ -5,7 +5,7 @@ import contextlib
 import dearpygui.dearpygui as dpg
 import threading
 from typing import Iterator
-from PIL.Image import Image, LANCZOS
+from PIL.Image import BOX, Image, LANCZOS
 from typing import Iterable, TypeVar
 
 TextureTag = TypeVar('TextureTag', bound=int)
@@ -74,14 +74,18 @@ def get_frame_duration(image: Image) -> float:
 _frames_lock_creation = threading.Lock()
 
 
+def get_image_lock(image: Image) -> threading.Lock:
+    """One lock per PIL image object: seeking frames changes the object itself"""
+    with _frames_lock_creation:
+        return image.__dict__.setdefault('_dpg_frames_lock', threading.Lock())
+
+
 def iter_frames(image: Image) -> Iterator[tuple[Image, float]]:
     """
     Yields (frame, duration in seconds) for every frame by seeking the image itself.
     Locks the image while iterating and seeks it back to the first frame at the end.
     """
-    with _frames_lock_creation:
-        lock = image.__dict__.setdefault('_dpg_frames_lock', threading.Lock())
-    with lock:
+    with get_image_lock(image):
         try:
             for index in range(get_frame_count(image)):
                 image.seek(index)
@@ -118,6 +122,20 @@ def get_texture_size(image_size: tuple[int, int], view_sizes: Iterable[tuple[int
     width = max(view_width for view_width, _ in view_sizes) * scale
     height = max(view_height for _, view_height in view_sizes) * scale
     return max(1, min(int(width), image_width)), max(1, min(int(height), image_height))
+
+
+def create_preview_texture(image: Image, width: int) -> TextureTag | None:
+    """
+    A tiny copy of the image (`width` px wide). DPG stretches it smoothly,
+    so it looks like a blurred preview while the real texture loads.
+    """
+    if not width:
+        return None
+    width = min(width, image.width)
+    height = max(1, round(width * image.height / image.width))
+    with get_image_lock(image):
+        preview = image.convert('RGBA').resize((width, height), BOX)
+    return image_to_dpg_texture(preview)
 
 
 def image_to_dpg_texture(image: Image, size: tuple[int, int] = None) -> TextureTag:

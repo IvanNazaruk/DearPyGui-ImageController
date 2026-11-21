@@ -60,6 +60,11 @@ class ImageViewerCreator(ABC):
 
         if self.__image_info.loaded:
             self.show(self.__image_info.texture_tag)
+        else:
+            self.hide()
+
+    def get_preview_texture(self) -> TextureTag | None:
+        return self.__image_info.preview_texture if self.__image_info else None
 
     def unload(self):
         self.load(None)
@@ -105,6 +110,7 @@ class ImageViewer(ImageViewerCreator):
     _view_window: int = None
 
     dpg_image: int | None = None
+    _loading_indicator: int | None = None
     _visible_handler: int = None
     image_handler: int | str | None = None
 
@@ -294,12 +300,17 @@ class ImageViewer(ImageViewerCreator):
             dpg.configure_item(self.dpg_image, texture_tag=texture_tag)
 
     def create_loading_indicator(self):
-        dpg.add_loading_indicator(parent=self._view_window)
+        width, height = self.get_size()
+        radius = max(1.0, min(3.0, min(width, height) / 40))
+        # shortcut: 13 px per radius unit is the indicator size with DPG's default font; other fonts put it slightly off center
+        size = radius * 13
+        self._loading_indicator = dpg.add_loading_indicator(radius=radius,
+                                                            pos=((width - size) / 2, (height - size) / 2),
+                                                            parent=self._view_window)
 
     def now_loading(self):
         with contextlib.suppress(Exception):
-            if elements := dpg.get_item_children(self._view_window, 1):
-                dpg.configure_item(elements[0], color=(0, 255, 0))
+            dpg.configure_item(self._loading_indicator, color=(0, 255, 0))
 
     def hide(self) -> 'Self':
         self.texture_tag = tools.get_texture_plug()
@@ -309,17 +320,17 @@ class ImageViewer(ImageViewerCreator):
 
         dpg.delete_item(self._view_window, children_only=True)
         if self.image:
-            self.create_loading_indicator()
-
             width, height = self.get_size()
             dpg.configure_item(self._view_window, width=width, height=height)
-            self.dpg_image = dpg.add_image(tools.get_texture_plug(),
+            self.dpg_image = dpg.add_image(self.get_preview_texture() or tools.get_texture_plug(),
                                            width=width,
                                            height=height,
+                                           pos=(0, 0),
                                            parent=self._view_window)
 
             if self.image_handler:
                 dpg.bind_item_handler_registry(self.dpg_image, self.image_handler)
+            self.create_loading_indicator()  # Drawn over the preview
         return self
 
     def delete(self):

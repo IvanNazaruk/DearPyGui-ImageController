@@ -39,6 +39,8 @@ class ImageController:
     texture_tag: TextureTag
 
     texture_size: tuple[int, int] | None = None
+    # Tiny blurred copy shown while the image is not loaded; lives as long as the image is in the controller
+    preview_texture: TextureTag | None = None
     frame_count: int = 1
     # One texture per frame; a still image has one
     frame_textures: list[TextureTag]
@@ -77,6 +79,10 @@ class ImageController:
         if len(self.subscribers) == 0:
             del self.controller[self.tag_in_controller]
             self.unload()
+            if self.preview_texture:
+                with contextlib.suppress(Exception):
+                    dpg.delete_item(self.preview_texture)
+                self.preview_texture = None
             self.image = None
             self.controller = None
 
@@ -295,6 +301,7 @@ class Controller(dict[ImageControllerTag, ImageController]):
     max_inactive_time: int | float
     unloading_check_sleep_time: int | float
     max_texture_bytes: int | None
+    preview_size: int
     _disable_work_in_threads: bool = False
     _last_time_unload_check: time.time = time.time()
 
@@ -332,7 +339,8 @@ class Controller(dict[ImageControllerTag, ImageController]):
                  number_image_loader_workers: int = 2,
                  queue_max_size: int = None,
                  disable_work_in_threads: bool = False,
-                 max_texture_bytes: int | None = None):
+                 max_texture_bytes: int | None = None,
+                 preview_size: int = 16):
         """
         :param max_inactive_time: Time in seconds after which the picture will be unloaded from the DPG/RAM, If last time visible is not updated
         :param unloading_check_sleep_time: In this number of seconds the last visibility of the image will be checked
@@ -340,11 +348,13 @@ class Controller(dict[ImageControllerTag, ImageController]):
         :param queue_max_size: If not set, it will be equal to number_image_loader_workers * 2
         :param disable_work_in_threads: Disables multi-threaded image un/loading, you have to use the `.load_images`/'.unload_images' function to un/load the images yourself
         :param max_texture_bytes: Maximum DPG texture memory for one image (all its frames together). A bigger image is loaded at a lower resolution. None - no limit
+        :param preview_size: Width in pixels of the blurred preview shown while an image loads. 0 - no preview
         """
         super().__init__()
 
         self.max_inactive_time = max_inactive_time
         self.max_texture_bytes = max_texture_bytes
+        self.preview_size = preview_size
         self.unloading_check_sleep_time = unloading_check_sleep_time
         if queue_max_size is None:
             queue_max_size = number_image_loader_workers * 2
@@ -389,6 +399,7 @@ class Controller(dict[ImageControllerTag, ImageController]):
             controller=self,
             frame_count=tools.get_frame_count(image)
         )
+        image_info.preview_texture = tools.create_preview_texture(image, self.preview_size)
         return image_tag, image_info
 
     def add_animation(self, image_controller: ImageController):

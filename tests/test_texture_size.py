@@ -70,8 +70,8 @@ def test_shrinking_view_keeps_texture(controller):
 def test_step_by_step_resize_rebuilds_rarely(controller, monkeypatch):
     created = []
     original = dpg_img.tools.image_to_dpg_texture
-    monkeypatch.setattr(dpg_img.tools, 'image_to_dpg_texture', lambda *args: created.append(args[1]) or original(*args))
-    viewer, image_info = create_viewer(controller, width=50)
+    viewer, image_info = create_viewer(controller, width=50)  # creates the preview texture
+    monkeypatch.setattr(dpg_img.tools, 'image_to_dpg_texture', lambda image, size: created.append(size) or original(image, size))
     for width in range(50, 1001, 10):
         viewer.set_width(width)
         show_frame(viewer, controller)

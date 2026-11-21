@@ -86,6 +86,9 @@ image_viewer.set_image_handler(image_handler)
  Animated images play automatically while they are visible and stop when they are not. Every frame is a separate texture, so an animation takes `frames` times more memory than a still image; use `max_texture_bytes` (below) to cap it.
  If you set `disable_work_in_threads = True`, call `dpg_img.default_controller.animate()` every frame next to `load_images()` and `unload_images()` (see [example2.py](example2.py)).
 
+ - ### Blurred preview while loading
+ Until the real texture is loaded, the viewer shows a tiny 16 px wide copy of the image stretched to the viewer size, with the loading indicator on top. It costs about 4 KB of texture memory per image. Change the width with `dpg_img.default_controller.preview_size = 8`, or set `0` to turn the preview off.
+
  - ### How to limit the memory of one image?
  DPG stores every texture pixel as 4 floats (16 bytes), so a 1920x1080 picture takes about 33 MB. Set a limit per image (all frames of an animation together) and bigger images are loaded at a lower resolution, keeping proportions:
 ```python
