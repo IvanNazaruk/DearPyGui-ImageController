@@ -69,7 +69,11 @@ Use `set_width`, `set_height` and `set_size`. If only one dimension is set, the 
 viewer = dpg_img.add_image("{IMAGE_PATH}", height=100)
 viewer.set_size(width=50, height=50)
 ```
-The texture is created at the size the image is shown, so a 1920×1080 picture shown 120 px wide takes a 120×67 texture. When the viewer grows past its texture, the texture is rebuilt 1.5× bigger (never bigger than the image), so resizing step by step doesn't rebuild it every time. A viewer without a set size gets the full-size texture.
+The texture is created at the size the image is shown, not at the file size. A 1920×1080 photo shown 120 px wide gets a 120×67 texture: about 0.13 MB instead of 33 MB.
+
+- **The viewer grows**: the texture is rebuilt with 1.5× headroom (never bigger than the image), so resizing step by step, e.g. with a slider, doesn't rebuild it on every step.
+- **The size settles**: once the viewer size hasn't changed for `shrink_delay` seconds (10 by default), a texture that is noticeably bigger than needed is rebuilt at the exact size. This drops the 1.5× headroom after growing and frees memory after the viewer shrank.
+- **No size set**: a viewer without `width`/`height` shows the image at its real size, so it gets the full-size texture.
 
 ### Click and other handlers
 Use `set_image_handler`; it works even while the image is not loaded:
@@ -90,14 +94,15 @@ GIF, APNG and animated WebP play automatically while they are visible and pause 
 ## Controller settings
 All viewers use `dpg_img.default_controller` unless you pass your own `dpg_img.Controller(...)` with `controller=`. Settings:
 
-| Setting | Default | What it does |
-|---|---|---|
-| `max_inactive_time` | `10` | Seconds an image can stay out of sight before it is unloaded |
-| `unloading_check_sleep_time` | `2.5` | How often (seconds) hidden images are checked for unloading |
-| `number_image_loader_workers` | `2` | Images loaded at the same time (constructor only) |
-| `max_texture_bytes` | `None` | Texture memory limit for one image, all frames together; bigger images load at a lower resolution |
-| `preview_size` | `16` | Width of the blurred preview in pixels; `0` turns it off |
-| `disable_work_in_threads` | `False` | Load, unload and animate in your own loop instead of threads |
+| Setting                       | Default | What it does                                                                                      |
+| ----------------------------- | ------- | ------------------------------------------------------------------------------------------------- |
+| `max_inactive_time`           | `10`    | Seconds an image can stay out of sight before it is unloaded                                      |
+| `unloading_check_sleep_time`  | `2.5`   | How often (seconds) hidden images are checked for unloading                                       |
+| `number_image_loader_workers` | `2`     | Images loaded at the same time (constructor only)                                                 |
+| `max_texture_bytes`           | `None`  | Texture memory limit for one image, all frames together; bigger images load at a lower resolution |
+| `preview_size`                | `16`    | Width of the blurred preview in pixels; `0` turns it off                                          |
+| `shrink_delay`                | `10`    | Seconds the viewer size must stay the same before an oversized texture is rebuilt smaller; `None` turns it off |
+| `disable_work_in_threads`     | `False` | Load, unload and animate in your own loop instead of threads                                      |
 
 DPG stores every texture pixel as 4 floats (16 bytes), so a 1920×1080 picture takes about 33 MB:
 ```python

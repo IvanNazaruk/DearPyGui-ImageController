@@ -49,12 +49,17 @@ class ImageController:
     next_frame_time: float = 0
 
     last_time_visible: time.time = 0
+    # The texture size the viewers needed last time, and when it changed
+    _last_needed_size: tuple[int, int] | None = None
+    _needed_size_changed_at: float = 0
 
     loading: bool = False
     loaded: bool = False
 
     # When a view grows past the texture, the new texture is this much bigger, so resizing step by step doesn't rebuild it every time
     grow_headroom = 1.5
+    # An oversized texture is rebuilt smaller only if it has this many times more pixels than needed
+    shrink_min_ratio = 1.2
     # An animation stops when the image has not been visible for this many seconds
     animation_visible_timeout = 0.5
 
@@ -104,6 +109,21 @@ class ImageController:
         texture_width, texture_height = self.texture_size
         return needed_width > texture_width or needed_height > texture_height
 
+    def needs_smaller_texture(self) -> bool:
+        """The texture is noticeably bigger than needed and the view size has not changed for `shrink_delay` seconds"""
+        shrink_delay = self.controller.shrink_delay if self.controller else None
+        if shrink_delay is None or not self.loaded or self.image is None or self.texture_size is None:
+            return False
+        needed_size = self.get_needed_texture_size()
+        if needed_size != self._last_needed_size:
+            self._last_needed_size = needed_size
+            self._needed_size_changed_at = time.time()
+            return False
+        if time.time() - self._needed_size_changed_at < shrink_delay:
+            return False
+        texture_pixels = self.texture_size[0] * self.texture_size[1]
+        return texture_pixels > needed_size[0] * needed_size[1] * self.shrink_min_ratio
+
     def is_unloading_time(self) -> bool:
         if self.image:
             return (time.time() - self.last_time_visible) > self.controller.max_inactive_time
@@ -118,7 +138,7 @@ class ImageController:
         self.last_time_visible = time.time()
         if self.image is None:
             return
-        if self.loaded and not self.needs_bigger_texture():
+        if self.loaded and not self.needs_bigger_texture() and not self.needs_smaller_texture():
             return
         if not self.loading:
             with contextlib.suppress(queue.Full):
@@ -256,12 +276,14 @@ class ImageLoaderWorker(Worker):
     def load(image_controller: ImageController):
         if not image_controller.loading:
             return
-        growing = image_controller.loaded
-        if image_controller.is_unloading_time() or (growing and not image_controller.needs_bigger_texture()):
+        reloading = image_controller.loaded
+        growing = reloading and image_controller.needs_bigger_texture()
+        shrinking = reloading and not growing and image_controller.needs_smaller_texture()
+        if image_controller.is_unloading_time() or (reloading and not growing and not shrinking):
             image_controller.loading = False
             return
 
-        if not growing:
+        if not reloading:
             image_controller.now_loading()
         textures, durations = [], []
         try:
@@ -302,6 +324,7 @@ class Controller(dict[ImageControllerTag, ImageController]):
     unloading_check_sleep_time: int | float
     max_texture_bytes: int | None
     preview_size: int
+    shrink_delay: int | float | None
     _disable_work_in_threads: bool = False
     _last_time_unload_check: time.time = time.time()
 
@@ -340,7 +363,8 @@ class Controller(dict[ImageControllerTag, ImageController]):
                  queue_max_size: int = None,
                  disable_work_in_threads: bool = False,
                  max_texture_bytes: int | None = None,
-                 preview_size: int = 16):
+                 preview_size: int = 16,
+                 shrink_delay: int | float | None = 10):
         """
         :param max_inactive_time: Time in seconds after which the picture will be unloaded from the DPG/RAM, If last time visible is not updated
         :param unloading_check_sleep_time: In this number of seconds the last visibility of the image will be checked
@@ -349,12 +373,14 @@ class Controller(dict[ImageControllerTag, ImageController]):
         :param disable_work_in_threads: Disables multi-threaded image un/loading, you have to use the `.load_images`/'.unload_images' function to un/load the images yourself
         :param max_texture_bytes: Maximum DPG texture memory for one image (all its frames together). A bigger image is loaded at a lower resolution. None - no limit
         :param preview_size: Width in pixels of the blurred preview shown while an image loads. 0 - no preview
+        :param shrink_delay: After the view size stays the same for this many seconds, a texture bigger than needed (after the view shrank, or the 1.5x headroom after it grew) is rebuilt at the exact size. None - never
         """
         super().__init__()
 
         self.max_inactive_time = max_inactive_time
         self.max_texture_bytes = max_texture_bytes
         self.preview_size = preview_size
+        self.shrink_delay = shrink_delay
         self.unloading_check_sleep_time = unloading_check_sleep_time
         if queue_max_size is None:
             queue_max_size = number_image_loader_workers * 2
