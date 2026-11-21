@@ -2,7 +2,7 @@ import dearpygui.dearpygui as dpg
 from PIL import Image
 
 import DearPyGui_ImageController as dpg_img
-from DearPyGui_ImageController.tools import get_texture_size
+from DearPyGui_ImageController.tools import BYTES_PER_PIXEL, fit_to_byte_limit, get_texture_size
 
 
 def test_texture_size_is_the_biggest_view_size():
@@ -78,3 +78,29 @@ def test_step_by_step_resize_rebuilds_rarely(controller, monkeypatch):
     print('textures created for 96 resize steps:', created)
     assert image_info.texture_size == (1000, 500)
     assert len(created) <= 10
+
+
+def test_byte_limit_keeps_size_that_fits():
+    assert fit_to_byte_limit((100, 50), max_bytes=100 * 50 * BYTES_PER_PIXEL) == (100, 50)
+    assert fit_to_byte_limit((100, 50), max_bytes=None) == (100, 50)
+
+
+def test_byte_limit_scales_down_keeping_proportions():
+    assert fit_to_byte_limit((1000, 500), max_bytes=100 * 50 * BYTES_PER_PIXEL) == (100, 50)
+
+
+def test_byte_limit_counts_every_frame():
+    assert fit_to_byte_limit((1000, 500), frame_count=4, max_bytes=100 * 50 * BYTES_PER_PIXEL) == (50, 25)
+
+
+def test_byte_limit_applies_to_loaded_texture(controller, monkeypatch):
+    controller.max_texture_bytes = 100 * 50 * BYTES_PER_PIXEL
+    viewer, image_info = create_viewer(controller)
+    show_frame(viewer, controller)
+    assert image_info.texture_size == (100, 50)
+
+    created = []
+    monkeypatch.setattr(dpg_img.tools, 'image_to_dpg_texture', lambda *args: created.append(args))
+    assert not image_info.needs_bigger_texture()
+    show_frame(viewer, controller)
+    assert created == []

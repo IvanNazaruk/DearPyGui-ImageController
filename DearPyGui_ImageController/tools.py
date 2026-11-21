@@ -43,6 +43,21 @@ def get_texture_plug() -> TextureTag:
     return texture_plug
 
 
+BYTES_PER_PIXEL = 16  # DPG keeps texture pixels as 4 float32 values (RGBA)
+
+
+def fit_to_byte_limit(size: tuple[int, int], frame_count: int = 1, max_bytes: int | None = None) -> tuple[int, int]:
+    """Scales the size down, keeping proportions, until frame_count textures of that size take at most max_bytes"""
+    if max_bytes is None:
+        return size
+    width, height = size
+    max_pixels = max_bytes / (BYTES_PER_PIXEL * frame_count)
+    if width * height <= max_pixels:
+        return size
+    scale = (max_pixels / (width * height)) ** 0.5
+    return max(1, int(width * scale)), max(1, int(height * scale))
+
+
 def get_texture_size(image_size: tuple[int, int], view_sizes: Iterable[tuple[int, int]], scale: float = 1) -> tuple[int, int]:
     """
     The smallest texture that covers every view size (times scale), but never bigger than the image itself.

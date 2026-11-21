@@ -74,9 +74,11 @@ class ImageController:
         for image_viewer in list(self.subscribers.values()):
             get_size = getattr(image_viewer, 'get_size', None)
             if get_size is None:  # A viewer without a size needs the full image
-                return self.image.size
+                view_sizes = []
+                break
             view_sizes.append(get_size())
-        return tools.get_texture_size(self.image.size, view_sizes, scale)
+        size = tools.get_texture_size(self.image.size, view_sizes, scale)
+        return tools.fit_to_byte_limit(size, max_bytes=self.controller.max_texture_bytes)
 
     def needs_bigger_texture(self) -> bool:
         if not self.loaded or self.image is None or self.texture_size is None:
@@ -236,6 +238,7 @@ class Controller(dict[ImageControllerTag, ImageController]):
 
     max_inactive_time: int | float
     unloading_check_sleep_time: int | float
+    max_texture_bytes: int | None
     _disable_work_in_threads: bool = False
     _last_time_unload_check: time.time = time.time()
 
@@ -269,17 +272,20 @@ class Controller(dict[ImageControllerTag, ImageController]):
                  unloading_check_sleep_time: int | float = 2.5,
                  number_image_loader_workers: int = 2,
                  queue_max_size: int = None,
-                 disable_work_in_threads: bool = False):
+                 disable_work_in_threads: bool = False,
+                 max_texture_bytes: int | None = None):
         """
         :param max_inactive_time: Time in seconds after which the picture will be unloaded from the DPG/RAM, If last time visible is not updated
         :param unloading_check_sleep_time: In this number of seconds the last visibility of the image will be checked
         :param number_image_loader_workers: Number of simultaneous loading of images
         :param queue_max_size: If not set, it will be equal to number_image_loader_workers * 2
         :param disable_work_in_threads: Disables multi-threaded image un/loading, you have to use the `.load_images`/'.unload_images' function to un/load the images yourself
+        :param max_texture_bytes: Maximum DPG texture memory for one image (all its frames together). A bigger image is loaded at a lower resolution. None - no limit
         """
         super().__init__()
 
         self.max_inactive_time = max_inactive_time
+        self.max_texture_bytes = max_texture_bytes
         self.unloading_check_sleep_time = unloading_check_sleep_time
         if queue_max_size is None:
             queue_max_size = number_image_loader_workers * 2
