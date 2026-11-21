@@ -150,9 +150,11 @@ class ImageController:
         if self.loaded and not self.needs_bigger_texture() and not self.needs_smaller_texture():
             return
         if not self.loading:
-            with contextlib.suppress(queue.Full):
+            self.loading = True  # Before put: a waiting loader skips images that are not marked as loading
+            try:
                 self.controller.loading_queue.put_nowait(self)
-                self.loading = True
+            except queue.Full:
+                self.loading = False
 
     def now_loading(self):
         for image_viewer in self.subscribers.values():
@@ -231,21 +233,32 @@ class ImageController:
                     traceback.print_exc()
 
 
+_workers_lock = threading.Lock()
+
+
 class Worker:
     STOP = False
     THREAD_RUNNING = False
 
     def start_thread(self):
-        self.STOP = False
-        if self.THREAD_RUNNING:
-            return
-        self.THREAD_RUNNING = True
-
+        with _workers_lock:
+            self.STOP = False
+            if self.THREAD_RUNNING:
+                return
+            self.THREAD_RUNNING = True
         threading.Thread(target=self._loop, daemon=True).start()
 
     def _loop(self):
-        while not self.STOP:
-            self.loop()
+        while True:
+            with _workers_lock:  # Checked together with start_thread, so a stop + start can't leave no thread running
+                if self.STOP:
+                    self.THREAD_RUNNING = False
+                    return
+            try:
+                self.loop()
+            except Exception:  # One failed step must not kill the thread for good
+                traceback.print_exc()
+                time.sleep(0.1)
 
     def loop(self):
         ...
@@ -285,11 +298,17 @@ class ImageLoaderWorker(Worker):
     def load(image_controller: ImageController):
         if not image_controller.loading:
             return
+        try:
+            ImageLoaderWorker._load(image_controller)
+        finally:
+            image_controller.loading = False  # Otherwise a failed image is never queued again
+
+    @staticmethod
+    def _load(image_controller: ImageController):
         reloading = image_controller.loaded
         growing = reloading and image_controller.needs_bigger_texture()
         shrinking = reloading and not growing and image_controller.needs_smaller_texture()
         if image_controller.is_unloading_time() or (reloading and not growing and not shrinking):
-            image_controller.loading = False
             return
 
         if not reloading:
@@ -306,8 +325,6 @@ class ImageLoaderWorker(Worker):
             for texture in textures:
                 with contextlib.suppress(Exception):
                     dpg.delete_item(texture)
-
-        image_controller.loading = False
 
     def loop(self):
         image_controller = self.queue.get()
@@ -348,7 +365,9 @@ class Controller(dict[ImageControllerTag, ImageController]):
             for worker in self._workers():
                 worker.stop()
             self.animation_worker.stop()
-        elif self._threads_started:
+            return
+        if self._threads_started or len(self) > 0:  # Before the first image the threads still start lazily
+            self._threads_started = True
             for worker in self._workers():
                 worker.start_thread()
             if self.animated_images:
