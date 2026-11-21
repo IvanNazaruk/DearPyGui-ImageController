@@ -99,7 +99,16 @@ class ImageController:
                 view_sizes = []
                 break
             view_sizes.append(get_size())
-        size = tools.get_texture_size(self.image.size, view_sizes, scale)
+        size = self._fit(tools.get_texture_size(self.image.size, view_sizes, scale))
+        if scale != 1:
+            # Clamping the headroom to the image and the byte limit can change its proportions,
+            # so it may not cover the exact size any more; then the exact size is used
+            exact_size = self._fit(tools.get_texture_size(self.image.size, view_sizes))
+            if size[0] < exact_size[0] or size[1] < exact_size[1]:
+                return exact_size
+        return size
+
+    def _fit(self, size: tuple[int, int]) -> tuple[int, int]:
         return tools.fit_to_byte_limit(size, self.frame_count, self.controller.max_texture_bytes)
 
     def needs_bigger_texture(self) -> bool:

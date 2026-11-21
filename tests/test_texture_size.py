@@ -104,3 +104,17 @@ def test_byte_limit_applies_to_loaded_texture(controller, monkeypatch):
     assert not image_info.needs_bigger_texture()
     show_frame(viewer, controller)
     assert created == []
+
+
+def test_growing_under_byte_limit_does_not_rebuild_every_frame(controller, monkeypatch):
+    controller.max_texture_bytes = 200_000 * BYTES_PER_PIXEL
+    with dpg.window():
+        viewer = dpg_img.add_image(Image.new('RGB', (1000, 1000), 'red'), controller=controller, width=900, height=300)
+    show_frame(viewer, controller)
+    viewer.set_size(width=901, height=300)
+    created = []
+    original = dpg_img.tools.image_to_dpg_texture
+    monkeypatch.setattr(dpg_img.tools, 'image_to_dpg_texture', lambda image, size: created.append(size) or original(image, size))
+    for _ in range(20):
+        show_frame(viewer, controller)
+    assert len(created) <= 1
