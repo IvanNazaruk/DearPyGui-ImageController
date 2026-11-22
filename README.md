@@ -20,7 +20,7 @@ https://user-images.githubusercontent.com/46572469/208324280-9e2e02a1-0479-433c-
 You can try this example with [example.py](example.py) (put images into a `test_images` folder next to it).
 
 ## Installation
-Python 3.9 or newer.
+Python 3.10 or newer.
 ```shell
 pip install "DearPyGui-ImageController[numpy]"
 ```

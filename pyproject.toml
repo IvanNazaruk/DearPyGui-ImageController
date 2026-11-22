@@ -9,7 +9,7 @@ description = "Shows a lot of images in Dear PyGui without running out of memory
 readme = "README.md"
 license = "MIT"
 authors = [{ name = "IvanNazaruk" }]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = ["dearpygui", "pillow"]
 classifiers = [
     "Programming Language :: Python :: 3",
