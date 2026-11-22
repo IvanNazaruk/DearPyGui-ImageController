@@ -1,7 +1,11 @@
+from pathlib import Path
+
 import dearpygui.dearpygui as dpg
 from PIL import Image
 
 import DearPyGui_ImageController as dpg_img
+
+images_path = sorted((Path(__file__).parent / 'test_images').glob('*.*'))
 
 dpg.create_context()
 dpg_img.set_texture_registry(dpg.add_texture_registry(show=True))
@@ -16,10 +20,11 @@ def update_image(path):
 
 
 with dpg.window() as window:
-    dpg.add_button(label="1.jpg",
-                   callback=lambda: update_image("1.jpg"))
-    dpg.add_button(label="2.jpg",
-                   callback=lambda: update_image("2.jpg"))
+    if not images_path:
+        dpg.add_text('Put some images into the test_images folder')
+    with dpg.group(horizontal=True):
+        for path in images_path:
+            dpg.add_button(label=path.name, user_data=path, callback=lambda _, __, path: update_image(path))
     image_cell.create()
 
 dpg.set_primary_window(window, True)
@@ -29,6 +34,7 @@ dpg.show_viewport()
 while dpg.is_dearpygui_running():
     dpg_img.default_controller.load_images(max_count=1)
     dpg_img.default_controller.unload_images(max_count=1)
+    dpg_img.default_controller.animate()
 
     dpg.render_dearpygui_frame()
 dpg.destroy_context()
